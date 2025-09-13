@@ -1,0 +1,550 @@
+import pandas as pd
+import numpy as np
+import os
+import glob
+import matplotlib.pyplot as plt
+import win32com.client as win32
+from PIL import Image, ImageOps
+from datetime import datetime
+
+
+class SistemaReportesAutomaticos:
+    def __init__(self):
+        # === CONFIGURACIÓN DE RUTAS ===
+        self.carpeta_base = r"D:\FNB\Reportes\19. Reportes IBR\01. Pendientes de Entrega"
+        self.carpeta_base_datos = os.path.join(self.carpeta_base, "Base")
+        self.carpeta_archivos = os.path.join(self.carpeta_base, "Archivos")
+        self.carpeta_canal = os.path.join(self.carpeta_base, "Canal")
+        self.carpeta_feriados = os.path.join(self.carpeta_base, "Feriados")
+        self.carpeta_faltantes = os.path.join(self.carpeta_base, "Canal Faltante")
+        self.carpeta_imagenes = os.path.join(self.carpeta_archivos, "tablas_img")
+        self.carpeta_resumen = os.path.join(self.carpeta_base, "Resumen")  # NUEVA CARPETA RESUMEN
+        self.firma_path = os.path.join(self.carpeta_base, 'Firma', 'Firma_resized.jpg')
+        # CAMBIO DE RUTA PARA DESTINATARIOS
+        self.destinatarios_path = os.path.join(self.carpeta_base, 'Destinatarios')
+
+        # Crear carpetas necesarias
+        os.makedirs(self.carpeta_archivos, exist_ok=True)
+        os.makedirs(self.carpeta_imagenes, exist_ok=True)
+        os.makedirs(self.carpeta_faltantes, exist_ok=True)
+        os.makedirs(self.carpeta_resumen, exist_ok=True)  # CREAR CARPETA RESUMEN
+
+    def buscar_excel_en_carpeta(self, carpeta):
+        """Busca el primer archivo Excel en una carpeta"""
+        archivos = glob.glob(os.path.join(carpeta, "*.xlsx"))
+        if not archivos:
+            raise FileNotFoundError(f"No se encontró ningún archivo .xlsx en {carpeta}")
+        return archivos[0]
+
+    def limpiar(self, df):
+        """Limpia espacios en blanco de columnas de texto"""
+        for col in df.select_dtypes(include='object').columns:
+            df[col] = df[col].astype(str).str.strip()
+        return df
+
+    def cargar_y_limpiar(self, ruta):
+        """Carga y limpia un archivo Excel"""
+        df = pd.read_excel(ruta)
+        return self.limpiar(df)
+
+    def calcular_dias_habiles(self, fecha_venta, feriados):
+        """Calcula días hábiles desde fecha de venta hasta hoy"""
+        if pd.isna(fecha_venta):
+            return 0
+        hoy = datetime.now().date()
+        if isinstance(fecha_venta, pd.Timestamp):
+            fecha_venta = fecha_venta.date()
+        if fecha_venta > hoy:
+            return 0
+        dias_totales = pd.date_range(fecha_venta, hoy, freq='D')
+        dias_habiles = [d for d in dias_totales if d.weekday() < 6 and d.date() not in feriados]
+        return max(len(dias_habiles) - 1, 0)
+
+    def actualizar_tabla_excel(self, ruta):
+        """Placeholder para actualización de tabla Excel"""
+        pass
+
+    def paso_1_generar_archivos_excel(self):
+        """PASO 1: Generar archivos Excel por proveedor Y archivo resumen general"""
+        print("=== PASO 1: GENERANDO ARCHIVOS EXCEL ===")
+
+        try:
+            # Carga de datos
+            ruta_base = self.buscar_excel_en_carpeta(self.carpeta_base_datos)
+            ruta_canal = self.buscar_excel_en_carpeta(self.carpeta_canal)
+            ruta_feriados = self.buscar_excel_en_carpeta(self.carpeta_feriados)
+
+            base = self.cargar_y_limpiar(ruta_base)
+            self.actualizar_tabla_excel(ruta_canal)
+            canal = self.cargar_y_limpiar(ruta_canal)
+            feriados_df = pd.read_excel(ruta_feriados)
+            feriados = set(pd.to_datetime(feriados_df.iloc[:, 0]).dt.date)
+
+            # Procesamiento de datos
+            base['FECHA VENTA'] = pd.to_datetime(base['FECHA VENTA'], errors='coerce', dayfirst=True)
+            base['SEDE'] = base['SEDE'].astype(str).str.strip().str.upper()
+            canal['Nombre Tienda de Venta'] = canal['Nombre Tienda de Venta'].astype(str).str.strip().str.upper()
+
+            base = base.merge(canal, how='left', left_on='SEDE', right_on='Nombre Tienda de Venta')
+
+            # Verificar faltantes
+            faltantes = base[base['Canal_Reporte'].isna()]['SEDE'].dropna().unique()
+            if len(faltantes) > 0:
+                with open(os.path.join(self.carpeta_faltantes, 'faltantes.txt'), 'w', encoding='utf-8') as f:
+                    for sede in faltantes:
+                        f.write(sede + '\n')
+
+            # Derivar canal
+            def derivar_canal(row):
+                if pd.isna(row['FECHA VENTA']):
+                    return row['Canal_Reporte']
+
+                # Retail especial para TOPITOP desde 01/08/2025
+                if row['FECHA VENTA'] >= pd.Timestamp(2025, 8, 1) and row['RESPONSABLE DE VENTA'] in ["TOPITOP"]:
+                    return "RETAIL"
+
+                # Retail general para Conecta e Integra desde 01/02/2024
+                if row['FECHA VENTA'] >= pd.Timestamp(2024, 2, 1) and row['RESPONSABLE DE VENTA'] in [
+                    "CONECTA RETAIL S.A.", "INTEGRA RETAIL S.A.C."]:
+                    return "RETAIL"
+
+                # Materiales y acabados (excepto responsables excluidos)
+                if row['CATEGORIA'] == "MATERIALES Y ACABADOS DE CONSTRUCCIÓN" and row['RESPONSABLE DE VENTA'] not in [
+                    "A & G INGENIERIA", "INCOSER GAS PERU S.A.C.", "PROMART"]:
+                    return "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
+
+                # Motos, excepto responsables retail
+                if row['CATEGORIA'] in ["MOTOS", "MOTOS ELECTRICAS", "ACCESORIOS MOTOS"] and row['RESPONSABLE DE VENTA'] not in [
+                    "CONECTA RETAIL S.A.", "INTEGRA RETAIL S.A.C."]:
+                    return "MOTOS"
+
+                return row['Canal_Reporte']
+
+            base['Canal de Venta'] = base.apply(derivar_canal, axis=1)
+            base['Canal de Venta'] = base['Canal de Venta'].replace('CHATBOT', 'DIGITAL')
+
+            # Tipo de producto
+            base['TipoProducto'] = base['PRODUCTO'].str.contains("PUNTO|DUCTE|ADICIONAL", case=False, na=False)
+            base['TipoProducto'] = np.where(base['TipoProducto'], "CON CONSTRUCCIÓN", "PRODUCTO SOLO")
+            base['Tipo Producto'] = np.where(
+                (base['ALIADO COMERCIAL'] == "GASODOMESTICOS") & (base['TipoProducto'] == "CON CONSTRUCCIÓN"),
+                "CON CONSTRUCCIÓN", "PRODUCTO SOLO")
+
+            # Calcular tiempo
+            base['Tiempo'] = base['FECHA VENTA'].apply(lambda x: self.calcular_dias_habiles(x, feriados) + 1)
+
+            # Evaluar rango
+            def evaluar_rango(row):
+                if row['ALIADO COMERCIAL'] == 'MALL HOGAR':
+                    return "FUERA DE PLAZO" if row['Tiempo'] > 10 else "DENTRO DE PLAZO"
+                elif row['Canal de Venta'] == 'MOTOS':
+                    return "FUERA DE PLAZO" if row['Tiempo'] > 30 else "DENTRO DE PLAZO"
+                elif row['CATEGORIA'] == 'MUEBLES':
+                    return "FUERA DE PLAZO" if row['Tiempo'] > 15 else "DENTRO DE PLAZO"
+                elif row['Tipo Producto'] == 'CON CONSTRUCCIÓN':
+                    return "FUERA DE PLAZO" if row['Tiempo'] > 15 else "DENTRO DE PLAZO"
+                elif row['Tipo Producto'] == 'PRODUCTO SOLO':
+                    return "FUERA DE PLAZO" if row['Tiempo'] > 4 else "DENTRO DE PLAZO"
+                else:
+                    return ""
+
+            base['Rango'] = base.apply(evaluar_rango, axis=1)
+            base['ALIADO COMERCIAL'] = base['ALIADO COMERCIAL'].str.replace('.', '', regex=False)
+            base['prexcant'] = base['PRECIO'] * base['CANTIDAD']
+
+            # Seleccionar columnas finales
+            columnas_finales = [
+                'RESPONSABLE DE VENTA', 'SEDE', 'ALIADO COMERCIAL', 'CUENTA CONTRATO', 'CLIENTE',
+                'DNI', 'TELÉFONO', 'Nro. PEDIDO VENTA', 'IMPORTE (S./)', 'FECHA VENTA', 'ESTADO',
+                'ASESOR DE VENTAS', 'PRODUCTO', 'SKU', 'CANTIDAD', 'PRECIO', 'CATEGORIA',
+                'Canal de Venta', 'TipoProducto', 'Tiempo', 'Rango', 'prexcant'
+            ]
+
+            columnas_existentes = [col for col in columnas_finales if col in base.columns]
+            base = base[columnas_existentes]
+            base = base.sort_values(by=['FECHA VENTA', 'Nro. PEDIDO VENTA'])
+
+            # Eliminar archivos anteriores de ambas carpetas
+            for f in glob.glob(os.path.join(self.carpeta_archivos, '*.xlsx')):
+                os.remove(f)
+            for f in glob.glob(os.path.join(self.carpeta_resumen, '*.xlsx')):
+                os.remove(f)
+
+            # Fecha y hora para nombre de archivo
+            fecha_hora_actual = datetime.now().strftime("%d-%m-%Y %H-%M")
+
+            # === GENERAR ARCHIVO RESUMEN GENERAL ===
+            nombre_resumen = f"Resumen General Pendientes de Entrega FNB - {fecha_hora_actual}.xlsx"
+            ruta_resumen = os.path.join(self.carpeta_resumen, nombre_resumen)
+
+            with pd.ExcelWriter(ruta_resumen, engine='xlsxwriter') as writer:
+                base.to_excel(writer, sheet_name='Resumen General', index=False)
+                self._formatear_excel(writer, 'Resumen General', base)
+
+            print(f"✅ Archivo resumen general generado: {nombre_resumen}")
+
+            # === GENERAR ARCHIVOS POR PROVEEDOR ===
+            archivos_generados = []
+            for proveedor, df_proveedor in base.groupby('ALIADO COMERCIAL'):
+                nombre_seguro = proveedor.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-') \
+                    .replace('?', '-').replace('"', '').replace('<', '-').replace('>', '-').replace('|', '-')
+                nombre_archivo = f"Pendientes de Entrega FNB - {nombre_seguro} - {fecha_hora_actual}.xlsx"
+                ruta_archivo = os.path.join(self.carpeta_archivos, nombre_archivo)
+
+                with pd.ExcelWriter(ruta_archivo, engine='xlsxwriter') as writer:
+                    df_proveedor.to_excel(writer, sheet_name='Pendientes', index=False)
+                    self._formatear_excel(writer, 'Pendientes', df_proveedor)
+
+                archivos_generados.append(nombre_archivo)
+                print(f"✅ Archivo generado: {nombre_archivo}")
+
+            print(f"✅ PASO 1 COMPLETADO: 1 archivo resumen + {len(archivos_generados)} archivos por proveedor")
+            return archivos_generados, nombre_resumen
+
+        except Exception as e:
+            print(f"❌ Error en PASO 1: {e}")
+            return [], None
+
+    def _formatear_excel(self, writer, sheet_name, df):
+        """Formatea el archivo Excel con estilos"""
+        workbook = writer.book
+        worksheet = writer.sheets[sheet_name]
+
+        formato_header = workbook.add_format({
+            'bold': True, 'font_name': 'Aptos', 'font_size': 8, 'bg_color': '#000000',
+            'font_color': '#FFFFFF', 'align': 'center', 'valign': 'vcenter'
+        })
+        formato_celda = workbook.add_format({
+            'font_name': 'Aptos', 'font_size': 8, 'align': 'left', 'valign': 'vcenter'
+        })
+        formato_fecha = workbook.add_format({
+            'font_name': 'Aptos', 'font_size': 8, 'num_format': 'dd/mm/yyyy',
+            'align': 'center', 'valign': 'vcenter'
+        })
+        formato_numero = workbook.add_format({
+            'font_name': 'Aptos', 'font_size': 8, 'num_format': '#,##0.00',
+            'align': 'right', 'valign': 'vcenter'
+        })
+
+        # Headers
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, formato_header)
+
+        # Datos
+        for row in range(1, len(df) + 1):
+            for col, column in enumerate(df.columns):
+                cell_value = df.iloc[row - 1, col]
+
+                if pd.isna(cell_value) or (
+                        isinstance(cell_value, float) and (np.isnan(cell_value) or np.isinf(cell_value))):
+                    worksheet.write(row, col, '', formato_celda)
+                elif column == 'FECHA VENTA':
+                    worksheet.write(row, col, cell_value, formato_fecha)
+                elif column in ['PRECIO', 'IMPORTE (S./)', 'prexcant']:
+                    worksheet.write(row, col, cell_value, formato_numero)
+                else:
+                    worksheet.write(row, col, cell_value, formato_celda)
+
+        # Ajustar ancho de columnas
+        worksheet.set_default_row(11.25)
+        for i, col in enumerate(df.columns):
+            column_len = max(df[col].astype(str).map(len).max(), len(str(col)))
+            worksheet.set_column(i, i, min(column_len + 2, 50))
+
+    def paso_2_generar_imagenes(self):
+        """PASO 2: Generar imágenes de tablas dinámicas"""
+        print("=== PASO 2: GENERANDO IMÁGENES DE TABLAS ===")
+
+        try:
+            files = [f for f in os.listdir(self.carpeta_archivos) if f.endswith('.xlsx')]
+            imagenes_generadas = []
+
+            for file in files:
+                file_path = os.path.join(self.carpeta_archivos, file)
+                df = pd.read_excel(file_path)
+
+                required_cols = {'prexcant', 'Nro. PEDIDO VENTA', 'FECHA VENTA', 'RESPONSABLE DE VENTA', 'Rango'}
+                if not required_cols.issubset(df.columns):
+                    print(f"❌ El archivo '{file}' no tiene las columnas necesarias.")
+                    continue
+
+                # Crear columna PERIODO
+                df['PERIODO'] = pd.to_datetime(df['FECHA VENTA']).dt.to_period('M').astype(str)
+
+                # Crear tabla dinámica
+                pivot = df.pivot_table(
+                    index=['PERIODO', 'RESPONSABLE DE VENTA'],
+                    columns='Rango',
+                    values=['prexcant', 'Nro. PEDIDO VENTA'],
+                    aggfunc={'prexcant': 'sum', 'Nro. PEDIDO VENTA': pd.Series.nunique},
+                    fill_value=0,
+                    margins=True,
+                    margins_name='TOTAL'
+                )
+
+                # Renombrar columnas
+                pivot.columns = [f"{'IMPORTE S/' if col[0] == 'prexcant' else '# TRX'} - {col[1]}" for col in
+                                 pivot.columns]
+                pivot.reset_index(inplace=True)
+
+                # Reordenar columnas
+                columnas_orden = [
+                    'RESPONSABLE DE VENTA',
+                    'IMPORTE S/ - FUERA DE PLAZO',
+                    '# TRX - FUERA DE PLAZO',
+                    'IMPORTE S/ - DENTRO DE PLAZO',
+                    '# TRX - DENTRO DE PLAZO',
+                    'IMPORTE S/ - TOTAL',
+                    '# TRX - TOTAL'
+                ]
+                for col in columnas_orden:
+                    if col not in pivot.columns:
+                        pivot[col] = 0
+
+                pivot = pivot[['PERIODO'] + columnas_orden]
+
+                # Ordenar por PERIODO y por IMPORTE
+                pivot['PERIODO_ORD'] = pd.to_datetime(pivot['PERIODO'], errors='coerce')
+                pivot['IMPORTE_ORD'] = pivot['IMPORTE S/ - TOTAL'].astype(float)
+                pivot = pivot.sort_values(by=['PERIODO_ORD', 'IMPORTE_ORD'], ascending=[False, False])
+                pivot.drop(columns=['PERIODO_ORD', 'IMPORTE_ORD'], inplace=True)
+
+                # Formatear columnas numéricas
+                for col in pivot.columns:
+                    if 'IMPORTE' in col:
+                        pivot[col] = pivot[col].astype(int).apply(lambda x: f"{x:,}")
+                    elif '# TRX' in col:
+                        pivot[col] = pivot[col].astype(int)
+
+                # Simular combinación de PERIODO
+                pivot['PERIODO_DISPLAY'] = pivot['PERIODO']
+                pivot.loc[pivot.duplicated(subset='PERIODO'), 'PERIODO_DISPLAY'] = ''
+                pivot.drop(columns='PERIODO', inplace=True)
+                pivot.insert(0, 'PERIODO', pivot.pop('PERIODO_DISPLAY'))
+
+                # Insertar salto de línea en títulos
+                pivot.columns = [
+                    col.replace(' - ', '\n').replace('RESPONSABLE DE VENTA', 'RESPONSABLE\nDE VENTA')
+                    if isinstance(col, str) else col
+                    for col in pivot.columns
+                ]
+
+                # Crear tabla como imagen
+                fig, ax = plt.subplots(figsize=(12, max(6, len(pivot) * 0.5)))
+                ax.axis('off')
+
+                tabla = ax.table(
+                    cellText=pivot.values,
+                    colLabels=pivot.columns,
+                    cellLoc='center',
+                    loc='center'
+                )
+
+                tabla.auto_set_font_size(False)
+                tabla.set_fontsize(8.5)
+                tabla.scale(1.2, 1.4)
+
+                # Guardar imagen temporal
+                temp_path = os.path.join(self.carpeta_imagenes, f'tabla_dinamica_{file.replace(".xlsx", "")}.png')
+                plt.tight_layout()
+                plt.savefig(temp_path, dpi=300, bbox_inches='tight')
+                plt.close()
+
+                # Recortar bordes blancos
+                img = Image.open(temp_path).convert("RGB")
+                gray = ImageOps.grayscale(img)
+                inverted = ImageOps.invert(gray)
+
+                bbox = inverted.getbbox()
+                if bbox:
+                    img_cropped = img.crop(bbox)
+                    img_cropped.save(temp_path)
+                    imagenes_generadas.append(temp_path)
+                    print(f"✅ Imagen generada: {os.path.basename(temp_path)}")
+
+            print(f"✅ PASO 2 COMPLETADO: {len(imagenes_generadas)} imágenes generadas")
+            return imagenes_generadas
+
+        except Exception as e:
+            print(f"❌ Error en PASO 2: {e}")
+            return []
+
+    def paso_3_enviar_correos(self):
+        """PASO 3: Generar y mostrar correos automáticos"""
+        print("=== PASO 3: GENERANDO CORREOS AUTOMÁTICOS ===")
+
+        try:
+            # Verificar archivos necesarios - NUEVA RUTA PARA DESTINATARIOS
+            listado_correos_path = self.buscar_excel_en_carpeta(self.destinatarios_path)
+
+            if not os.path.exists(listado_correos_path):
+                print(f"❌ No se encontró el listado de correos en: {self.destinatarios_path}")
+                return []
+
+            if not os.path.exists(self.firma_path):
+                print(f"❌ No se encontró la imagen de firma: {self.firma_path}")
+                return []
+
+            # Leer listado de correos
+            df_proveedores = pd.read_excel(listado_correos_path)
+            df_proveedores.set_index('Proveedor', inplace=True)
+
+            # Iniciar Outlook
+            outlook = win32.Dispatch('Outlook.Application')
+
+            correos_generados = []
+
+            # Recorrer archivos Excel
+            for file in os.listdir(self.carpeta_archivos):
+                if not file.endswith('.xlsx'):
+                    continue
+
+                excel_path = os.path.join(self.carpeta_archivos, file)
+                image_path = os.path.join(self.carpeta_imagenes, f'tabla_dinamica_{file.replace(".xlsx", "")}.png')
+
+                if not os.path.exists(image_path):
+                    print(f"❌ Imagen no encontrada para {file}")
+                    continue
+
+                # Redimensionar imagen de tabla
+                try:
+                    with Image.open(image_path) as img:
+                        new_width = 927  # 24.5 cm a 96 dpi
+                        w_percent = new_width / float(img.size[0])
+                        new_height = int(float(img.size[1]) * w_percent)
+                        img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        img_resized.save(image_path)
+                except Exception as e:
+                    print(f"❌ Error al redimensionar imagen de tabla: {e}")
+                    continue
+
+                # Leer Excel
+                try:
+                    df = pd.read_excel(excel_path)
+                except:
+                    print(f"❌ No se pudo leer: {file}")
+                    continue
+
+                if 'ALIADO COMERCIAL' not in df.columns:
+                    print(f"❌ Columna 'ALIADO COMERCIAL' no encontrada en {file}")
+                    continue
+
+                aliados = df['ALIADO COMERCIAL'].dropna().unique()
+
+                for aliado in aliados:
+                    if aliado not in df_proveedores.index:
+                        print(f"❌ Aliado no encontrado en listado: {aliado}")
+                        continue
+
+                    df_filtrado = df[df['ALIADO COMERCIAL'] == aliado]
+                    if df_filtrado.empty:
+                        continue
+
+                    # Cálculos
+                    total_pedidos = df_filtrado['Nro. PEDIDO VENTA'].nunique()
+                    total_importe = df_filtrado['prexcant'].sum()
+                    fuera = df_filtrado[df_filtrado['Rango'] == 'FUERA DE PLAZO']
+                    total_fuera = fuera['Nro. PEDIDO VENTA'].nunique()
+                    importe_fuera = fuera['prexcant'].sum()
+                    porcentaje_fuera = (total_fuera / total_pedidos) * 100 if total_pedidos > 0 else 0
+
+                    # Destinatarios
+                    to = df_proveedores.loc[aliado, 'Destinatarios directos']
+                    cc = df_proveedores.loc[aliado, 'Destinatarios en copia']
+                    cc = cc if pd.notna(cc) else ""
+
+                    # Crear correo
+                    mail = outlook.CreateItem(0)
+                    mail.To = to
+                    mail.CC = cc
+                    mail.Subject = file.replace('.xlsx', '')
+                    mail.Attachments.Add(excel_path)
+
+                    # Adjuntar imagen de tabla
+                    img_id = "tabla1"
+                    attachment = mail.Attachments.Add(image_path)
+                    attachment.PropertyAccessor.SetProperty("http://schemas.microsoft.com/mapi/proptag/0x3712001F",
+                                                            img_id)
+
+                    # Adjuntar imagen de firma
+                    firma_id = "firmaimg"
+                    firma_attachment = mail.Attachments.Add(self.firma_path)
+                    firma_attachment.PropertyAccessor.SetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F", firma_id)
+
+                    # HTML con firma embebida
+                    html_body = f"""
+                    <html>
+                    <body style="font-family: Aptos, sans-serif; font-size: 11pt;">
+                    Buenos días:<br><br>
+
+                    Tenemos a la fecha <b>{total_pedidos}</b> pedidos por entregar por un total de <b>S/ {total_importe:,.0f}</b>, 
+                    de los cuales <b>{total_fuera}</b> se encuentran fuera de fecha (<b>S/ {importe_fuera:,.0f}</b>), 
+                    equivalente al <b>{porcentaje_fuera:.2f}%</b>.<br><br>
+
+                    <img src="cid:{img_id}"><br><br>
+
+                    Adjunto la BD de pendientes de entrega para que nos puedan enviar el status de cada uno de ellos.<br><br>
+
+                    Atentamente,<br><br>
+
+                    <img src="cid:{firma_id}">
+                    </body>
+                    </html>
+                    """
+
+                    mail.HTMLBody = html_body
+                    mail.Send()  # Mostrar correo para revisión antes de enviar
+                    correos_generados.append(f"{aliado} - {file}")
+                    print(f"✅ Correo listo para: {aliado}")
+
+            print(f"✅ PASO 3 COMPLETADO: {len(correos_generados)} correos generados")
+            return correos_generados
+
+        except Exception as e:
+            print(f"❌ Error en PASO 3: {e}")
+            return []
+
+    def ejecutar_proceso_completo(self):
+        """Ejecuta todo el proceso de manera secuencial"""
+        print("🚀 INICIANDO SISTEMA DE REPORTES AUTOMÁTICOS")
+        print("=" * 60)
+
+        # PASO 1: Generar archivos Excel
+        resultado_paso1 = self.paso_1_generar_archivos_excel()
+        if isinstance(resultado_paso1, tuple):
+            archivos_excel, archivo_resumen = resultado_paso1
+        else:
+            archivos_excel = resultado_paso1
+            archivo_resumen = None
+
+        if not archivos_excel:
+            print("❌ No se pudieron generar archivos Excel. Proceso detenido.")
+            return
+
+        print("\n" + "=" * 60)
+
+        # PASO 2: Generar imágenes
+        imagenes = self.paso_2_generar_imagenes()
+        if not imagenes:
+            print("❌ No se pudieron generar imágenes. Proceso detenido.")
+            return
+
+        print("\n" + "=" * 60)
+
+        # PASO 3: Generar correos
+        correos = self.paso_3_enviar_correos()
+
+        print("\n" + "=" * 60)
+        print("🎉 PROCESO COMPLETADO EXITOSAMENTE")
+        print(f"📊 Archivo resumen general: {'✅' if archivo_resumen else '❌'}")
+        print(f"📊 Archivos Excel por proveedor: {len(archivos_excel)}")
+        print(f"🖼️  Imágenes generadas: {len(imagenes)}")
+        print(f"📧 Correos preparados: {len(correos)}")
+        print("=" * 60)
+
+
+# === EJECUCIÓN PRINCIPAL ===
+if __name__ == "__main__":
+    sistema = SistemaReportesAutomaticos()
+    sistema.ejecutar_proceso_completo()
