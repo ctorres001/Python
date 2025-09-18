@@ -5,7 +5,6 @@ env/
 
 # ⚙️ Configuración de VS Code y PyCharm
 .vscode/
-.idea/
 
 # 🔄 Caché y compilados de Python
 __pycache__/
