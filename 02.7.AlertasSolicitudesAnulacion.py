@@ -468,14 +468,24 @@ class SistemaSolicitudesAnulacion:
                 if escenario in ["IBR PERU", "SALESLAND", "DIGITAL"]:
                     if "SEDE" in df_pivot.columns:
                         df_pivot.drop(columns=["SEDE"], inplace=True)
-                    df_pivot = df_pivot[["ALIADO COMERCIAL", "SOLICITUDES"]]
-
-                    # Reordenar manteniendo totales al final
+                    
+                    # REAGRUPAR datos para eliminar duplicados de ALIADO COMERCIAL
                     if not total_row.empty:
                         total_row = total_row[["ALIADO COMERCIAL", "SOLICITUDES"]]
                         data_rows = df_pivot[df_pivot["ALIADO COMERCIAL"] != "TOTAL"]
-                        data_rows = data_rows.sort_values(by="SOLICITUDES", ascending=False)
-                        df_pivot = pd.concat([data_rows, total_row], ignore_index=True)
+                        
+                        # Consolidar duplicados agrupando por ALIADO COMERCIAL
+                        if not data_rows.empty and "SOLICITUDES" in data_rows.columns:
+                            data_rows = data_rows.groupby("ALIADO COMERCIAL", as_index=False)["SOLICITUDES"].sum()
+                            data_rows = data_rows.sort_values(by="SOLICITUDES", ascending=False)
+                            
+                            # Recalcular el total correctamente
+                            total_row.loc[total_row.index[0], "SOLICITUDES"] = data_rows["SOLICITUDES"].sum()
+                            df_pivot = pd.concat([data_rows, total_row], ignore_index=True)
+                        else:
+                            df_pivot = df_pivot[["ALIADO COMERCIAL", "SOLICITUDES"]]
+                    else:
+                        df_pivot = df_pivot[["ALIADO COMERCIAL", "SOLICITUDES"]]
 
                 elif escenario == "GENERAL":
                     if estado in ["Derivado al responsable de venta", "Por derivar al responsable de la venta",

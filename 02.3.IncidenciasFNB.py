@@ -45,6 +45,57 @@ print("🔧 Estados de validación fallida configurados:")
 for estado in ESTADOS_VALIDACION_FALLIDA:
     print(f"   - '{estado}'")
 
+# FUNCIÓN GLOBAL DE EXONERACIÓN
+def aplicar_exoneracion_global(df):
+    """
+    Aplica exoneración basada en archivo Exonerados.xlsx a cualquier DataFrame
+    Retorna el DataFrame filtrado excluyendo los contratos exonerados
+    """
+    if df.empty:
+        return df
+        
+    ruta_exonerados = os.path.join(ruta_base, r"04. Reporte incidencias\Exonerados\Exonerados.xlsx")
+    contratos_exonerados = set()
+    
+    try:
+        if os.path.exists(ruta_exonerados):
+            df_exonerados = pd.read_excel(ruta_exonerados)
+            if 'Nro. DE CONTRATO' in df_exonerados.columns:
+                # Obtener lista de contratos exonerados, limpiando espacios y valores nulos
+                contratos_exonerados = set(
+                    str(contrato).strip()
+                    for contrato in df_exonerados['Nro. DE CONTRATO'].dropna()
+                    if str(contrato).strip() != '' and str(contrato).strip() != 'nan'
+                )
+                print(f"   📋 Contratos exonerados disponibles: {len(contratos_exonerados)}")
+            else:
+                print("   ⚠️  Columna 'Nro. DE CONTRATO' no encontrada en archivo de exonerados")
+        else:
+            print(f"   ⚠️  Archivo de exonerados no encontrado: {ruta_exonerados}")
+    except Exception as e:
+        print(f"   ❌ Error cargando archivo de exonerados: {str(e)}")
+    
+    # Aplicar exoneración solo si hay contratos para exonerar y la columna existe
+    if contratos_exonerados and 'Nro. DE CONTRATO' in df.columns:
+        # Crear una serie con los contratos como string para comparación
+        contratos_df = df['Nro. DE CONTRATO'].astype(str).str.strip()
+        
+        # Contar registros antes de la exoneración
+        registros_antes = len(df)
+        
+        # Filtrar excluyendo los contratos exonerados
+        df_filtrado = df[~contratos_df.isin(contratos_exonerados)]
+        
+        # Mostrar información de exoneración
+        registros_exonerados = registros_antes - len(df_filtrado)
+        if registros_exonerados > 0:
+            print(f"   🚫 Registros exonerados en este escenario: {registros_exonerados}")
+            print(f"   📊 Registros restantes: {len(df_filtrado)}")
+        
+        return df_filtrado
+    else:
+        return df
+
 os.makedirs(ruta_salida, exist_ok=True)
 
 df = pd.read_excel(ruta_procesado, dtype=str)
@@ -176,35 +227,11 @@ def filtro_ventas_rechazadas_sin_venta_posterior(df):
     - ESTADO DE ARCHIVOS(SUSTENTO DE ENTREGA) debe ser "SI"
     - ALIADO COMERCIAL no debe ser "CARDIF"
     - Verificación de que no exista venta posterior exitosa con mismas características
-    - NUEVO: Exoneración por archivo Exonerados.xlsx basado en Nro. DE CONTRATO
+    - NOTA: La exoneración se aplica ahora globalmente, no aquí
     """
 
     # Crear copia del DataFrame para no modificar el original
     df = df.copy()
-
-    # NUEVO: Cargar archivo de exonerados
-    ruta_exonerados = os.path.join(ruta_base, r"04. Reporte incidencias\Exonerados\Exonerados.xlsx")
-    contratos_exonerados = set()
-
-    try:
-        if os.path.exists(ruta_exonerados):
-            df_exonerados = pd.read_excel(ruta_exonerados)
-            if 'Nro. DE CONTRATO' in df_exonerados.columns:
-                # Obtener lista de contratos exonerados, limpiando espacios y valores nulos
-                contratos_exonerados = set(
-                    str(contrato).strip()
-                    for contrato in df_exonerados['Nro. DE CONTRATO'].dropna()
-                    if str(contrato).strip() != '' and str(contrato).strip() != 'nan'
-                )
-                print(f"📋 Contratos exonerados cargados: {len(contratos_exonerados)}")
-                if contratos_exonerados:
-                    print(f"   Primeros 5 contratos: {list(contratos_exonerados)[:5]}")
-            else:
-                print("⚠️  Columna 'Nro. DE CONTRATO' no encontrada en archivo de exonerados")
-        else:
-            print(f"⚠️  Archivo de exonerados no encontrado: {ruta_exonerados}")
-    except Exception as e:
-        print(f"❌ Error cargando archivo de exonerados: {str(e)}")
 
     # Convertir fechas y horas a datetime para comparaciones precisas
     df['FECHA VENTA'] = pd.to_datetime(df['FECHA VENTA'], errors='coerce')
@@ -247,25 +274,6 @@ def filtro_ventas_rechazadas_sin_venta_posterior(df):
         # NUEVO - ALIADO COMERCIAL no debe ser CARDIF
         (df['ALIADO COMERCIAL'].str.upper() != 'CARDIF')
         ].copy()
-
-    # NUEVO: Aplicar exoneración por Nro. DE CONTRATO
-    if contratos_exonerados and 'Nro. DE CONTRATO' in df_validos.columns:
-        # Crear una serie con los contratos como string para comparación
-        contratos_df = df_validos['Nro. DE CONTRATO'].astype(str).str.strip()
-
-        # Contar registros antes de la exoneración
-        registros_antes = len(df_validos)
-
-        # Filtrar excluyendo los contratos exonerados
-        df_validos = df_validos[~contratos_df.isin(contratos_exonerados)]
-
-        # Mostrar información de exoneración
-        registros_exonerados = registros_antes - len(df_validos)
-        if registros_exonerados > 0:
-            print(f"🚫 Registros exonerados: {registros_exonerados}")
-            print(f"📊 Registros restantes después de exoneración: {len(df_validos)}")
-        else:
-            print("✅ No se encontraron registros para exonerar en este escenario")
 
     if df_validos.empty:
         return df_validos
@@ -370,7 +378,7 @@ archivos = []
 resumen_html_comercial = ""
 resumen_html_proyectos = ""
 
-# CORRECCIÓN: Manejo diferenciado según el tipo de filtro - SIN NUMERACIÓN
+# CORRECCIÓN: Manejo diferenciado según el tipo de filtro - CON EXONERACIÓN GLOBAL
 for nombre_base, tipo_filtro, filtro_fn in nombres_archivos:
     try:
         print(f"\n🔄 Procesando escenario: {nombre_base}")
@@ -383,16 +391,20 @@ for nombre_base, tipo_filtro, filtro_fn in nombres_archivos:
             condicion = filtro_fn(df)
             df_filtrado = df[condicion].copy()
 
-            # Debug especial para escenarios que usan los nuevos estados
-            if any(estado in nombre_base.upper() for estado in ['VALIDACIÓN FALLIDA', 'INVALIDO']):
-                print(f"   🔍 Registros que cumplen la condición: {len(df_filtrado)}")
-                if len(df_filtrado) > 0 and 'ESTADO' in df_filtrado.columns:
-                    estados_encontrados = df_filtrado['ESTADO'].value_counts()
-                    print(f"   📋 Estados encontrados en este escenario:")
-                    for estado, count in estados_encontrados.items():
-                        print(f"      - '{estado}': {count}")
+        # *** APLICAR EXONERACIÓN GLOBAL A TODOS LOS ESCENARIOS ***
+        if not df_filtrado.empty:
+            df_filtrado = aplicar_exoneracion_global(df_filtrado)
 
-        # ======= MODIFICADO: Solo procesar si hay registros =======
+        # Debug especial para escenarios que usan los nuevos estados
+        if any(estado in nombre_base.upper() for estado in ['VALIDACIÓN FALLIDA', 'INVALIDO']):
+            print(f"   🔍 Registros que cumplen la condición: {len(df_filtrado)}")
+            if len(df_filtrado) > 0 and 'ESTADO' in df_filtrado.columns:
+                estados_encontrados = df_filtrado['ESTADO'].value_counts()
+                print(f"   📋 Estados encontrados en este escenario:")
+                for estado, count in estados_encontrados.items():
+                    print(f"      - '{estado}': {count}")
+
+        # ======= MODIFICADO: Solo procesar si hay registros después de la exoneración =======
         if not df_filtrado.empty:
             conteo = len(df_filtrado)
             
@@ -518,3 +530,4 @@ except Exception as e:
             f"⚠️  Se encontraron {len(registros_invalido)} registros con estado 'INVALIDO' que podrían no haberse procesado")
     else:
         print("✅ No se encontraron registros con estado 'INVALIDO'")
+        

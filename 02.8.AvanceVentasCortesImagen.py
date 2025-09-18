@@ -1177,8 +1177,16 @@ class SalesImageGenerator:
             return False
         
         try:
+            # NUEVO: Determinar saludo según la hora actual
+            hora_actual = datetime.now().time()
+            if hora_actual < dt_time(12, 0):  # Antes de las 12:00:00
+                saludo = "Buenos días, se brinda el comparativo de ventas:"
+            else:  # A partir de las 12:00:00
+                saludo = "Buenas tardes, se brinda el comparativo de ventas:"
+            
+            # Estructura de envío con saludo dinámico
             estructura_envio = [
-                ("Buenos días, se brinda el comparativo de ventas:", None),
+                (saludo, None),  # Usar el saludo dinámico
                 ("Resumen General", "01_resumen_general"),
                 ("Canal Aló Cálidda", "alo_calidda"),
                 ("Canal CSC", "csc"),

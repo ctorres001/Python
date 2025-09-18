@@ -1,0 +1,31 @@
+# 🐍 Ignorar entornos virtuales
+.venv/
+.venv1/
+env/
+
+# ⚙️ Configuración de VS Code y PyCharm
+.vscode/
+.idea/
+
+# 🔄 Caché y compilados de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 🌐 Archivos de navegador y perfiles
+Whatsapp_Firefox/
+!Whatsapp_Firefox/cookies.sqlite  # Solo si es esencial para tu flujo
+
+# 📦 Node.js y frontend
+node_modules/
+Node/
+
+# 📁 Ignorar todo por defecto
+*
+
+# ✅ Incluir solo archivos .py
+!*.py
+
+# 🧾 Incluir este archivo
+!.gitignore
