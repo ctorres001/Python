@@ -28,6 +28,7 @@ Node/
 
 # ❌ Excluir específicamente pruebas.py
 pruebas.py
+pru*.py
 
 # 🧾 Incluir este archivo
 !.gitignore
