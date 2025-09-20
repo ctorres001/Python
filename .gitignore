@@ -26,5 +26,8 @@ Node/
 # ✅ Incluir solo archivos .py
 !*.py
 
+# ❌ Excluir específicamente pruebas.py
+pruebas.py
+
 # 🧾 Incluir este archivo
 !.gitignore
