@@ -98,7 +98,7 @@ filtro_anulaciones_mes = (
     (df['ESTADO'] == 'ANULADO') &
     (df['FECHA VENTA'] >= mes_inicio) &
     (df['FECHA VENTA'] < mes_fin) &
-    (df['CANAL_VENTA'].isin(['DIGITAL', 'ALO CÁLIDDA', 'CANAL PROVEEDOR', 'CSC', 'FFVV - PUERTA A PUERTA'])) &
+    (df['CANAL_VENTA'].isin(['DIGITAL', 'ALO CÁLIDDA', 'CANAL PROVEEDOR', 'CSC', 'FFVV - PUERTA A PUERTA', 'GRANDES SUPERFICIES', 'TIENDAS CÁLIDDA', 'RETAIL', 'MOTOS', 'MATERIALES'])) &
     (df['ALIADO COMERCIAL'].str.upper() != 'CARDIF') &
     (df['MOTIVO ANULACIÓN'].str.upper() != 'PRUEBAS')
 )
