@@ -321,7 +321,8 @@ class ReporteFNB:
             "IBR PERU": [
                 ('canal_venta', None, None, 'canal'),
                 ('motos', 'Canal', 'MOTOS', 'proveedor'),
-                ('materiales', 'Canal', 'FERRETERAS', 'proveedor')
+                ('materiales', 'Canal', 'FERRETERAS', 'proveedor'),
+                ('digital', 'Canal', 'DIGITAL', 'proveedor')  # ← NUEVA LÍNEA
             ],
             "SALESLAND": [
                 ('por_proveedor', None, None, 'proveedor'),
@@ -514,6 +515,12 @@ class ReporteFNB:
             extra += "<strong>Detalle Canal Materiales:</strong><br><br>"
             for img_tipo, ruta_img in imagenes:
                 if img_tipo == "materiales":
+                    extra += f'<img src="cid:{img_tipo}" style="width: 12cm; height: auto; max-width: 100%;"><br><br>'
+
+            # ← AGREGAR ESTA SECCIÓN
+            extra += "<strong>Detalle Canal Digital:</strong><br><br>"
+            for img_tipo, ruta_img in imagenes:
+                if img_tipo == "digital":
                     extra += f'<img src="cid:{img_tipo}" style="width: 12cm; height: auto; max-width: 100%;"><br><br>'
 
         elif proveedor == "SALESLAND":
