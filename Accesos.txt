@@ -1,0 +1,168 @@
+Plataforma FNB
+CTORRES -- Sup. de Operación
+Konecta$$4
+CTORRESC -- Gestor de Operaciones
+KcOueKHESwxy
+Konecta$$3$
+
+SAP
+C_CTORRES
+IBRTorrCad2#$*25#$*
+
+SAP QAS
+C_CTORRES
+Proyecto24$1649.*25
+
+SAP R3
+CC_CTORRES
+Proyecto#125**
+
+Plataforma FNB - Desarrollo QAS 1
+CarlosGO
+CarlosGO123*
+CarlosSO
+CarlosSO123*
+https://appwebdev.calidda.com.pe/WebFNBDEV/login
+
+Plataforma FNB - Desarrollo QAS 2
+CTORRES
+aEtVCSESB7*
+CTORRESC
+
+https://fnbqas.calidda.com.pe/WebFNB_QA/login
+
+Aranda
+p_catorres
+Proyecto#2*
+
+Calidda
+p_ctorres
+Proyecto#2
+
+SIGS
+GENCALIDDA
+654321
+
+Correo
+carlos.torres@ibr.com.pe
+C@lidda.2025**
+C@lidda.2025***
+
+Calidda2024NC
+
+c_bnima
+Konecta24********
+
+VPN
+carlos.torres
+Y#a9$%$2bdK)E
+
+SQL
+192.168.64.250
+carlos.torres
+Ibr#123
+
+192.168.64.250
+ctorres
+ibr2025
+
+GitHub
+ctorres001
+Lima3.14159*
+
+****************************************************
+26
+2
+Instalados: 2/10/2025 vs 2/05/2025 (2 días hábiles)
+Vendidos: 2/10/2025 vs 2/05/2025 (2 días hábiles)
+****************************************************
+RGINTSAP001
+LORCCOTOMA
+MDELROSARIO
+SACOSTA
+
+ZSDGEB_FEE (Reporte Consola de Pagos)
+ZSDGEB_FEE_REP (Reporte Consola de Pagos como reporte, sale columna con cuotas facturadas)
+VA03 (Consulta de venta por pedido o cuenta)
+VA05 (Consulta de venta historico)	
+ZSDGNLC_R032_MASS (Reporte potenciales por BP)
+ZSDGNLC_R032 (Reporte potenciales por CC)
+ZISUMGEB_EST_CONTRAT (historico de la cuenta, propietario/inquilino)
+ZISUCGNLC_FIN01 (Financiamientos por numero de plan)
+ZISUCGNLC_FIN17 (Financiamientos por CC)
+ZISUCGNLC_FIN15 (Reporte de financiamientos)
+IW52 (Revisar avisos)
+ZISUWGEB_REP_AVISOS (Reporte de avisos)
+FPL9 (Estado de cuenta por CC)
+BP (Datos del BP)
+VA02 (Consulta de venta por pedido o cuenta, opciones de modificacion)
+ZSDGEB_FNB 
+ZSDGEB_CLASE_FEE
+SM37
+IW58
+FPO4 - ESTADO DE CUENTA DEL CLIENTE
+ZSDGNLC_CONCILIACION - Conciliacion FNB y SAP
+ZISUWGEB_CIERRE_MED
+UKM_MALUS_DSP - Limite de saldo
+ZISSDGEB_FNB01 - Anulaciones sin recibos emitidos
+ZISUWGEB_REP_T_CYR - Reporte de cortes
+*******************************************************************************************
+[<999950]0,"K";[<999950000]0.00,,"M";0.00,,,"B"
+[<999950]0.000,"";[<999950000]0.000,,"";0.000,,,""
+*******************************************************************************************
+Solicitud: Anulación de Financiamiento FNB 
+PV Producto: 1002472249 - DD: 5001943996 - Importe S/. 2020.00
+PV Seguro: 1002472250 - DD: 5001943999 - Importe S/. 16.36
+Considerar también la anulación cualquier penalidad o interés moratorio generado en los Pedidos de Venta.
+Motivo: Devolución de producto 
+Responsable: Cristina Vasquez
+Sustento: Se adjunta correo solicitando anulación de financiamiento.
+*******************************************************************************************
+#"Todas las columnas seleccionadas" = Table.SelectColumns(#"Columna de tabla expandida1", Table.ColumnNames(#"Columna de tabla expandida1")),
+
+let
+    lista_fechas = Table.Column(BD_Colocaciones,"Fecha_Entrega"),
+    fecha_minima = List.Min(lista_fechas),
+    fecha_maxima = List.Max(lista_fechas),
+    dias = Number.From(fecha_maxima - fecha_minima) + 1,
+    fechas = List.Dates(fecha_minima, dias, #duration(1,0,0,0)),
+    #"Convertida en tabla" = Table.FromList(fechas, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Tipo cambiado" = Table.TransformColumnTypes(#"Convertida en tabla",{{"Column1", type date}}),
+    #"Columnas con nombre cambiado" = Table.RenameColumns(#"Tipo cambiado",{{"Column1", "Fecha"}}),
+    #"Año insertado" = Table.AddColumn(#"Columnas con nombre cambiado", "Año", each Date.Year([Fecha]), Int64.Type),
+    #"Mes insertado" = Table.AddColumn(#"Año insertado", "Mes", each Date.Month([Fecha]), Int64.Type),
+    #"Nombre del mes insertado" = Table.AddColumn(#"Mes insertado", "Nombre del mes", each Date.MonthName([Fecha]), type text),
+    #"Día insertado" = Table.AddColumn(#"Nombre del mes insertado", "Día", each Date.Day([Fecha]), Int64.Type),
+    #"Nombre del día insertado" = Table.AddColumn(#"Día insertado", "Nombre del día", each Date.DayOfWeekName([Fecha]), type text)
+in
+    #"Nombre del día insertado"
+
+=SI(CONTAR.SI($A$2:A2;A2)>1;"Duplicado";"Único")
+******************************************************************************************
+
+Ajustar la Base de Potenciales
+5199463	4	2/06/2023
+5320440	4	11/04/2024
+LA ALBORADA -- COMAS
+
+Los lineamientos desde el 4.07 son compras de Celulares solo de 3 a 24 cuotas en general y categorias aprobadas para algunos aliados como calzado, jugueteria, textil o utiles escolares solo de 3 a 12 cuotas y con un monto maximo de 1,000 para jugueteria y 2,000 para utiles
+
+******************************************************************************************
+
+Propuestas:
+Propuesta para que el registro de productos genericos y especificos se realice directamente en la plataforma FNB
+Propuesta para que los aliados se auto gestionen sus listas de precios
+
+<p>, <ul>, y <li> por <br> en el caso de las listas o viñetas, reemplazar por un guión medio - 
+
+
+"AÑO_FE": "INT"
+"B_ENERO": "VARCHAR(200)",
+
+yadea con sumo
+socopur con ebiker
+gaso con merpes
+
+Para el martes tener todo listo para el blackout
+
+
