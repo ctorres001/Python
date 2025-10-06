@@ -32,3 +32,4 @@ pru*.py
 
 # 🧾 Incluir este archivo
 !.gitignore
+!Accesos.txt
