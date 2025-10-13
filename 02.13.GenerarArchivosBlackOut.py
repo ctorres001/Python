@@ -1,52 +1,32 @@
 import pandas as pd
+import xlwings as xw
 import os
 from pathlib import Path
 from datetime import datetime
+import time
+import win32com.client as win32
 
 # Configuración de rutas
 ARCHIVO_ORIGEN = r"D:\FNB\Reportes\19. Reportes IBR\00. Estructura Reporte\Procesado\Archivo_Procesado.xlsx"
-CARPETA_DESTINO = r"D:\FNB\Reportes\19. Reportes IBR\12. Pendientes de Entrega Blackout\Archivos actualizados"
-CARPETA_NO_MAPEADOS = r"D:\FNB\Reportes\19. Reportes IBR\12. Pendientes de Entrega Blackout\Archivos no mapeados"
+CARPETA_BASE = r"C:\Users\carlos.torres2\Gas Natural de Lima y Callao S.A. (GNLC)\FNB - 99. BlackOut\09-2025\Aliados"
+CARPETA_NO_MAPEADOS = os.path.join(CARPETA_BASE, "z_OTROS")
+
+# Contraseña para protección
+PASSWORD = "Calidda2024NC"
 
 # Lista de aliados comerciales
 ALIADOS = [
-    "A & G INGENIERIA",
-    "AC COMPANY",
-    "AGHASO PERÚ",
-    "ALMAJER",
-    "CREDIVARGAS",
-    "CROSLAND AUTOMOTRIZ S.A.C.",
-    "DISTRIBUIDORA LUNA",
-    "DISTRIBUIDORA VICKY - AMPER",
-    "GAME CENTER OFICIAL",
-    "GASODOMESTICOS",
-    "GRUPO MERPES",
-    "HARDTECH",
-    "HERTFORD AUTOMOTRIZ",
-    "INCOSER GAS PERU S.A.C.",
-    "INTEGRA RETAIL",
-    "KITCHEN CENTER",
-    "KOJAC",
-    "L & H ARQUITECTURA E INGENIERIA",
-    "LOGISTICALS",
-    "LQ TRAIDING",
-    "MALL HOGAR",
-    "MAQUIMOTORA",
-    "MATERIALES NASCA",
-    "MI PC LISTA",
-    "MULTITOP",
-    "PERU SMART",
-    "RHEEM PERU",
-    "SACO",
-    "SANY PERU",
-    "SEI PERU",
-    "SOCOPUR",
-    "TOP MOTORS",
-    "TRS",
-    "VAINSA"
+    "A & G INGENIERIA", "AC COMPANY", "AGHASO PERÚ", "ALMAJER", "CREDIVARGAS",
+    "CROSLAND AUTOMOTRIZ S.A.C.", "DISTRIBUIDORA LUNA", "DISTRIBUIDORA VICKY - AMPER",
+    "GAME CENTER OFICIAL", "GASODOMESTICOS", "GRUPO MERPES", "HARDTECH",
+    "HERTFORD AUTOMOTRIZ", "INCOSER GAS PERU S.A.C.", "INTEGRA RETAIL", "KITCHEN CENTER",
+    "KOJAC", "L & H ARQUITECTURA E INGENIERIA", "LOGISTICALS", "LQ TRAIDING",
+    "MALL HOGAR", "MAQUIMOTORA", "MATERIALES NASCA", "MI PC LISTA", "MULTITOP",
+    "PERU SMART", "RHEEM PERU", "SACO", "SANY PERU", "SEI PERU", "SOCOPUR",
+    "TOP MOTORS", "TRS", "VAINSA"
 ]
 
-# Columnas finales del reporte (incluye los 20 grupos de productos)
+# Columnas del reporte
 COLUMNAS_REPORTE = [
     "RESPONSABLE DE VENTA", "SEDE", "ALIADO COMERCIAL", "CUENTA CONTRATO", 
     "CLIENTE", "DNI", "TELÉFONO", "CORREO", "Nro. PEDIDO VENTA", 
@@ -55,7 +35,7 @@ COLUMNAS_REPORTE = [
     "ASESOR DE VENTAS", "VALIDACIÓN MOTORIZADO"
 ]
 
-# Agregar columnas de productos del 1 al 20
+# Agregar columnas de productos
 for i in range(1, 21):
     COLUMNAS_REPORTE.extend([
         f"PRODUCTO_{i}", f"SKU_{i}", f"CANTIDAD_{i}", f"PRECIO_{i}", 
@@ -63,11 +43,8 @@ for i in range(1, 21):
         f"TIPO PRODUCTO_{i}", f"MODELO PRODUCTO_{i}", f"SKU2_{i}", f"DESCRIPCION_{i}"
     ])
 
-def crear_carpeta_destino():
-    """Crea la carpeta de destino si no existe"""
-    Path(CARPETA_DESTINO).mkdir(parents=True, exist_ok=True)
-    print(f"✓ Carpeta de destino verificada: {CARPETA_DESTINO}")
-    
+def crear_carpetas():
+    """Crea las carpetas necesarias si no existen"""
     Path(CARPETA_NO_MAPEADOS).mkdir(parents=True, exist_ok=True)
     print(f"✓ Carpeta no mapeados verificada: {CARPETA_NO_MAPEADOS}")
 
@@ -78,20 +55,13 @@ def leer_archivo_origen():
         df = pd.read_excel(ARCHIVO_ORIGEN)
         print(f"✓ Archivo leído exitosamente. Total de registros: {len(df)}")
         
-        # Estandarizar la columna ALIADO COMERCIAL a mayúsculas
+        # Estandarizar columnas
         if 'ALIADO COMERCIAL' in df.columns:
             df['ALIADO COMERCIAL'] = df['ALIADO COMERCIAL'].str.upper().str.strip()
-            print(f"✓ Columna ALIADO COMERCIAL estandarizada a mayúsculas")
-        
-        # Estandarizar TIPO DESPACHO a mayúsculas
         if 'TIPO DESPACHO' in df.columns:
             df['TIPO DESPACHO'] = df['TIPO DESPACHO'].str.upper().str.strip()
-            print(f"✓ Columna TIPO DESPACHO estandarizada a mayúsculas")
-        
-        # Estandarizar ESTADO a mayúsculas
         if 'ESTADO' in df.columns:
             df['ESTADO'] = df['ESTADO'].str.upper().str.strip()
-            print(f"✓ Columna ESTADO estandarizada a mayúsculas")
         
         return df
     except Exception as e:
@@ -102,25 +72,21 @@ def filtrar_datos(df):
     """Filtra los datos según los criterios especificados"""
     print("\nAplicando filtros...")
     
-    # Filtro 1: Aliados comerciales (para archivos principales)
     df_filtrado = df[df['ALIADO COMERCIAL'].isin(ALIADOS)].copy()
     print(f"  - Después de filtrar por aliados mapeados: {len(df_filtrado)} registros")
     
-    # Filtro 2: Tipo de despacho
     tipos_despacho = ["DELIVERY A DOMICILIO", "RECOJO EN TIENDA"]
     df_filtrado = df_filtrado[df_filtrado['TIPO DESPACHO'].isin(tipos_despacho)]
     print(f"  - Después de filtrar por tipo despacho: {len(df_filtrado)} registros")
     
-    # Filtro 3: Estado
     df_filtrado = df_filtrado[df_filtrado['ESTADO'] == 'PENDIENTE DE ENTREGA']
     print(f"  - Después de filtrar por estado: {len(df_filtrado)} registros")
     
-    # Filtrar registros NO MAPEADOS (excluyendo CARDIF)
     print("\n--- Buscando aliados no mapeados ---")
     df_no_mapeados = df[
-        (~df['ALIADO COMERCIAL'].isin(ALIADOS)) &  # No está en la lista de aliados
-        (df['ALIADO COMERCIAL'] != 'CARDIF') &     # No es CARDIF
-        (df['ESTADO'] == 'PENDIENTE DE ENTREGA')   # Estado pendiente
+        (~df['ALIADO COMERCIAL'].isin(ALIADOS)) &
+        (df['ALIADO COMERCIAL'] != 'CARDIF') &
+        (df['ESTADO'] == 'PENDIENTE DE ENTREGA')
     ].copy()
     print(f"  - Registros no mapeados encontrados: {len(df_no_mapeados)}")
     
@@ -133,67 +99,241 @@ def filtrar_datos(df):
     
     return df_filtrado, df_no_mapeados
 
-def ajustar_columnas(df):
-    """Ajusta las columnas para incluir todos los grupos de productos del 1 al 20"""
+def preparar_datos(df):
+    """Prepara los datos con formato correcto"""
+    if 'FECHA VENTA' in df.columns:
+        df['FECHA VENTA'] = pd.to_datetime(df['FECHA VENTA'], errors='coerce')
+    if 'FECHA ENTREGA' in df.columns:
+        df['FECHA ENTREGA'] = pd.to_datetime(df['FECHA ENTREGA'], errors='coerce')
     
-    # Crear DataFrame con todas las columnas necesarias
-    df_final = pd.DataFrame(columns=COLUMNAS_REPORTE)
+    columnas_orden = []
+    if 'FECHA VENTA' in df.columns:
+        columnas_orden.append('FECHA VENTA')
+    if 'HORA VENTA' in df.columns:
+        columnas_orden.append('HORA VENTA')
     
-    # Copiar columnas existentes
-    for col in COLUMNAS_REPORTE:
-        if col in df.columns:
-            df_final[col] = df[col]
+    if columnas_orden:
+        df = df.sort_values(columnas_orden, ascending=True)
     
-    # Formatear columnas numéricas con 2 decimales
-    # Columnas de importes
     columnas_numericas = ['IMPORTE (S./)', 'CRÉDITO UTILIZADO']
-    
-    # Agregar todas las columnas PRECIO_1 a PRECIO_20
     for i in range(1, 21):
         columnas_numericas.append(f'PRECIO_{i}')
     
-    # Aplicar formato de 2 decimales
     for col in columnas_numericas:
-        if col in df_final.columns:
-            df_final[col] = pd.to_numeric(df_final[col], errors='coerce')
-            df_final[col] = df_final[col].round(2)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].round(2)
     
-    return df_final
+    columnas_disponibles = [col for col in COLUMNAS_REPORTE if col in df.columns]
+    df = df[columnas_disponibles]
+    
+    return df
 
-def cargar_archivo_existente(ruta_archivo):
-    """Carga un archivo Excel existente o retorna un DataFrame vacío"""
-    if os.path.exists(ruta_archivo):
+def actualizar_archivo_aliado(aliado, df_nuevos):
+    """Actualiza el archivo de un aliado específico usando xlwings"""
+    print(f"\n[{aliado}]")
+    print(f"  • Registros nuevos encontrados: {len(df_nuevos)}")
+    
+    carpeta_aliado = os.path.join(CARPETA_BASE, aliado)
+    nombre_archivo = f"Base Pendientes para Proveedores - {aliado}.xlsx"
+    ruta_archivo = os.path.join(carpeta_aliado, nombre_archivo)
+    
+    if not os.path.exists(ruta_archivo):
+        print(f"  ⚠ Archivo no encontrado: {ruta_archivo}")
+        return None
+    
+    app = None
+    wb = None
+    
+    try:
+        # Abrir Excel con configuraciones iniciales
+        app = xw.App(visible=False)
+        app.display_alerts = False
+        app.screen_updating = False
+        app.enable_events = False
+        
+        wb = app.books.open(ruta_archivo, update_links=False, read_only=False)
+        ws = wb.sheets[0]
+        
+        print(f"  ✓ Archivo abierto: {nombre_archivo}")
+        
+        # Esperar a que se cargue completamente
+        time.sleep(0.3)
+        
+        # Desproteger libro - usar try/except independiente
         try:
-            df_existente = pd.read_excel(ruta_archivo)
-            print(f"  - Archivo existente encontrado con {len(df_existente)} registros")
-            return df_existente
+            wb.api.Unprotect(PASSWORD)
+            time.sleep(0.1)
+            print(f"  ✓ Libro desprotegido")
         except Exception as e:
-            print(f"  - Error al leer archivo existente: {e}. Se creará uno nuevo.")
-            return pd.DataFrame(columns=COLUMNAS_REPORTE)
-    else:
-        print(f"  - Archivo nuevo, se creará desde cero")
-        return pd.DataFrame(columns=COLUMNAS_REPORTE)
-
-def realizar_carga_incremental(df_nuevo, df_existente):
-    """Combina datos nuevos con existentes, evitando duplicados por Nro. DE CONTRATO"""
-    if df_existente.empty:
-        return df_nuevo
+            print(f"  ⚠ Advertencia al desproteger libro: {e}")
+        
+        # Desproteger hoja - verificar que ws.api existe
+        try:
+            if ws.api is not None:
+                ws.api.Unprotect(PASSWORD)
+                time.sleep(0.1)
+                print(f"  ✓ Hoja desprotegida")
+            else:
+                print(f"  ⚠ Advertencia: No se pudo acceder a ws.api")
+        except Exception as e:
+            print(f"  ⚠ Advertencia al desproteger hoja: {e}")
+        
+        # Encontrar última fila con datos
+        try:
+            ultima_fila = ws.api.Cells(ws.api.Rows.Count, 5).End(-4162).Row
+            print(f"  • Última fila con datos: {ultima_fila}")
+        except:
+            try:
+                ultima_fila = ws.used_range.last_cell.row
+                print(f"  • Última fila con datos: {ultima_fila}")
+            except:
+                ultima_fila = 1
+                print(f"  • No hay datos previos, comenzando desde fila 1")
+        
+        # Leer contratos existentes
+        contratos_existentes = set()
+        if ultima_fila > 1:
+            try:
+                idx_contrato = COLUMNAS_REPORTE.index('Nro. DE CONTRATO')
+                col_contrato = idx_contrato + 5  # Columna E = 5
+                
+                for fila in range(2, ultima_fila + 1):
+                    try:
+                        valor = ws.range((fila, col_contrato)).value
+                        if valor is not None:
+                            contratos_existentes.add(str(valor))
+                    except:
+                        continue
+                
+                print(f"  • Contratos existentes: {len(contratos_existentes)}")
+            except Exception as e:
+                print(f"  ⚠ Error al leer contratos: {e}")
+        
+        # Filtrar registros nuevos
+        df_nuevos['Nro. DE CONTRATO'] = df_nuevos['Nro. DE CONTRATO'].astype(str)
+        df_incremental = df_nuevos[~df_nuevos['Nro. DE CONTRATO'].isin(contratos_existentes)]
+        
+        registros_agregados = 0
+        if df_incremental.empty:
+            print(f"  → No hay registros nuevos para agregar")
+            ultima_fila_final = ultima_fila
+        else:
+            print(f"  → Registros a agregar: {len(df_incremental)}")
+            fila_inicio = ultima_fila + 1
+            
+            datos = df_incremental.values.tolist()
+            
+            # Escribir datos fila por fila
+            try:
+                for i, fila_datos in enumerate(datos):
+                    fila_actual = fila_inicio + i
+                    for j, valor in enumerate(fila_datos):
+                        col = j + 5  # Columna E = 5
+                        try:
+                            ws.range((fila_actual, col)).value = valor
+                        except:
+                            continue
+                    registros_agregados += 1
+                
+                print(f"  ✓ {registros_agregados} registros escritos desde fila {fila_inicio}")
+            except Exception as e:
+                print(f"  ✗ Error al escribir datos: {e}")
+                registros_agregados = 0
+            
+            ultima_fila_final = ultima_fila + registros_agregados
+        
+        # Aplicar formatos solo si hay datos y ws.api está disponible
+        if ultima_fila_final > 1 and ws.api is not None:
+            try:
+                print(f"  • Aplicando formato...")
+                
+                # Fuente
+                num_columnas = len(COLUMNAS_REPORTE)
+                rango = ws.range((1, 5), (ultima_fila_final, 4 + num_columnas))
+                rango.api.Font.Name = "Aptos Narrow"
+                rango.api.Font.Size = 8
+                print(f"  ✓ Formato de fuente aplicado")
+                
+                # Formato de fechas
+                try:
+                    idx_fecha_venta = COLUMNAS_REPORTE.index('FECHA VENTA')
+                    col_fv = idx_fecha_venta + 5
+                    rango_fv = ws.range((2, col_fv), (ultima_fila_final, col_fv))
+                    rango_fv.number_format = 'dd/mm/yyyy'
+                    print(f"  ✓ Formato de FECHA VENTA aplicado")
+                except:
+                    pass
+                
+                try:
+                    idx_fecha_entrega = COLUMNAS_REPORTE.index('FECHA ENTREGA')
+                    col_fe = idx_fecha_entrega + 5
+                    rango_fe = ws.range((2, col_fe), (ultima_fila_final, col_fe))
+                    rango_fe.number_format = 'dd/mm/yyyy'
+                    print(f"  ✓ Formato de FECHA ENTREGA aplicado")
+                except:
+                    pass
+            
+            except Exception as e:
+                print(f"  ⚠ Error al aplicar formatos: {e}")
+        
+        # Proteger hoja con parámetros correctos para xlwings
+        try:
+            if ws.api is not None:
+                ws.api.Protect(Password=PASSWORD, Contents=True)
+                time.sleep(0.1)
+                print(f"  ✓ Hoja protegida")
+        except Exception as e:
+            print(f"  ⚠ Error al proteger hoja: {e}")
+        
+        # Proteger libro
+        try:
+            wb.api.Protect(PASSWORD, True, False)
+            time.sleep(0.1)
+            print(f"  ✓ Libro protegido")
+        except Exception as e:
+            print(f"  ⚠ Error al proteger libro: {e}")
+        
+        # Guardar
+        try:
+            wb.save()
+            time.sleep(0.2)
+            print(f"  ✓ Archivo guardado")
+        except Exception as e:
+            print(f"  ✗ Error al guardar: {e}")
+            return None
+        
+        print(f"  ✓ Proceso completado exitosamente")
+        print(f"    → Total de registros en archivo: {ultima_fila_final - 1}")
+        
+        return {
+            'Aliado': aliado,
+            'Registros Nuevos': registros_agregados,
+            'Total Registros': ultima_fila_final - 1,
+            'Archivo': nombre_archivo
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"  ✗ Error al procesar archivo: {e}")
+        print(traceback.format_exc())
+        return None
     
-    # Identificar contratos existentes
-    contratos_existentes = set(df_existente['Nro. DE CONTRATO'].dropna())
-    
-    # Filtrar solo registros nuevos
-    df_incremental = df_nuevo[~df_nuevo['Nro. DE CONTRATO'].isin(contratos_existentes)]
-    
-    print(f"    → Registros nuevos a agregar: {len(df_incremental)}")
-    
-    # Combinar
-    df_combinado = pd.concat([df_existente, df_incremental], ignore_index=True)
-    
-    return df_combinado
+    finally:
+        if wb:
+            try:
+                wb.close()
+            except:
+                pass
+        if app:
+            try:
+                app.quit()
+            except:
+                pass
+        time.sleep(0.5)
 
 def procesar_aliados(df_filtrado):
-    """Procesa cada aliado comercial y genera/actualiza su archivo"""
+    """Procesa cada aliado comercial"""
     print(f"\n{'='*60}")
     print("PROCESANDO ALIADOS COMERCIALES")
     print(f"{'='*60}")
@@ -201,47 +341,16 @@ def procesar_aliados(df_filtrado):
     resumen = []
     
     for aliado in ALIADOS:
-        # Filtrar datos del aliado
         df_aliado = df_filtrado[df_filtrado['ALIADO COMERCIAL'] == aliado].copy()
         
         if df_aliado.empty:
             continue
         
-        print(f"\n[{aliado}]")
-        print(f"  • Registros encontrados: {len(df_aliado)}")
+        df_aliado = preparar_datos(df_aliado)
+        resultado = actualizar_archivo_aliado(aliado, df_aliado)
         
-        # Ajustar columnas
-        df_aliado = ajustar_columnas(df_aliado)
-        
-        # Ordenar por FECHA VENTA
-        if 'FECHA VENTA' in df_aliado.columns:
-            df_aliado['FECHA VENTA'] = pd.to_datetime(df_aliado['FECHA VENTA'], errors='coerce')
-            df_aliado = df_aliado.sort_values('FECHA VENTA', ascending=True)
-        
-        # Nombre del archivo
-        nombre_archivo = f"{aliado}.xlsx"
-        ruta_archivo = os.path.join(CARPETA_DESTINO, nombre_archivo)
-        
-        # Cargar archivo existente
-        df_existente = cargar_archivo_existente(ruta_archivo)
-        
-        # Realizar carga incremental
-        df_final = realizar_carga_incremental(df_aliado, df_existente)
-        
-        # Guardar archivo
-        try:
-            df_final.to_excel(ruta_archivo, index=False, engine='openpyxl')
-            print(f"  ✓ Archivo guardado: {nombre_archivo}")
-            print(f"    → Total de registros en archivo: {len(df_final)}")
-            
-            resumen.append({
-                'Aliado': aliado,
-                'Registros Nuevos': len(df_aliado),
-                'Total Registros': len(df_final),
-                'Archivo': nombre_archivo
-            })
-        except Exception as e:
-            print(f"  ✗ Error al guardar archivo: {e}")
+        if resultado:
+            resumen.append(resultado)
     
     return resumen
 
@@ -258,33 +367,34 @@ def procesar_no_mapeados(df_no_mapeados):
     print("PROCESANDO ALIADOS NO MAPEADOS")
     print(f"{'='*60}")
     
-    # Ajustar columnas
-    df_no_mapeados = ajustar_columnas(df_no_mapeados)
+    df_no_mapeados = preparar_datos(df_no_mapeados)
     
-    # Ordenar por FECHA VENTA
-    if 'FECHA VENTA' in df_no_mapeados.columns:
-        df_no_mapeados['FECHA VENTA'] = pd.to_datetime(df_no_mapeados['FECHA VENTA'], errors='coerce')
-        df_no_mapeados = df_no_mapeados.sort_values('FECHA VENTA', ascending=True)
-    
-    # Nombre del archivo
     nombre_archivo = "Aliados_No_Mapeados.xlsx"
     ruta_archivo = os.path.join(CARPETA_NO_MAPEADOS, nombre_archivo)
     
     print(f"\n[ALIADOS NO MAPEADOS]")
     print(f"  • Registros encontrados: {len(df_no_mapeados)}")
     
-    # Cargar archivo existente
-    df_existente = cargar_archivo_existente(ruta_archivo)
+    df_existente = pd.DataFrame()
+    if os.path.exists(ruta_archivo):
+        try:
+            df_existente = pd.read_excel(ruta_archivo)
+            print(f"  - Archivo existente encontrado con {len(df_existente)} registros")
+        except Exception as e:
+            print(f"  - Error al leer archivo existente: {e}")
     
-    # Realizar carga incremental
-    df_final = realizar_carga_incremental(df_no_mapeados, df_existente)
+    if not df_existente.empty:
+        contratos_existentes = set(df_existente['Nro. DE CONTRATO'].astype(str))
+        df_no_mapeados['Nro. DE CONTRATO'] = df_no_mapeados['Nro. DE CONTRATO'].astype(str)
+        df_incremental = df_no_mapeados[~df_no_mapeados['Nro. DE CONTRATO'].isin(contratos_existentes)]
+        df_final = pd.concat([df_existente, df_incremental], ignore_index=True)
+    else:
+        df_final = df_no_mapeados
     
-    # Guardar archivo
     try:
         df_final.to_excel(ruta_archivo, index=False, engine='openpyxl')
         print(f"  ✓ Archivo guardado: {nombre_archivo}")
         print(f"    → Total de registros en archivo: {len(df_final)}")
-        print(f"    → Ubicación: {CARPETA_NO_MAPEADOS}")
         
         return {
             'Registros Nuevos': len(df_no_mapeados),
@@ -305,7 +415,6 @@ def mostrar_resumen(resumen, resumen_no_mapeados):
         print("No se procesaron archivos.")
         return
     
-    # Resumen de aliados mapeados
     if resumen:
         df_resumen = pd.DataFrame(resumen)
         print(f"\n📊 ALIADOS MAPEADOS:")
@@ -314,7 +423,6 @@ def mostrar_resumen(resumen, resumen_no_mapeados):
         print(f"\n  Detalle por aliado:")
         print("  " + df_resumen.to_string(index=False).replace('\n', '\n  '))
     
-    # Resumen de aliados no mapeados
     if resumen_no_mapeados:
         print(f"\n⚠️  ALIADOS NO MAPEADOS:")
         print(f"  • Registros nuevos: {resumen_no_mapeados['Registros Nuevos']}")
@@ -323,43 +431,37 @@ def mostrar_resumen(resumen, resumen_no_mapeados):
     
     print(f"\n{'='*60}")
     print(f"✓ Proceso completado exitosamente")
-    print(f"  Archivos mapeados: {CARPETA_DESTINO}")
-    print(f"  Archivos no mapeados: {CARPETA_NO_MAPEADOS}")
+    print(f"  Carpeta base: {CARPETA_BASE}")
+    print(f"  No mapeados: {CARPETA_NO_MAPEADOS}")
     print(f"{'='*60}")
 
 def main():
     """Función principal"""
     print(f"{'='*60}")
-    print("GENERADOR DE REPORTES IBR POR ALIADO COMERCIAL")
+    print("ACTUALIZADOR DE REPORTES IBR CON XLWINGS")
     print(f"{'='*60}")
     print(f"Fecha/Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # Crear carpeta de destino
-    crear_carpeta_destino()
+    crear_carpetas()
     
-    # Leer archivo origen
     df_origen = leer_archivo_origen()
     if df_origen is None:
         return
     
-    # Filtrar datos
     df_filtrado, df_no_mapeados = filtrar_datos(df_origen)
     
     if df_filtrado.empty and df_no_mapeados.empty:
         print("\n⚠ No se encontraron registros que cumplan los criterios de filtrado.")
         return
     
-    # Procesar cada aliado mapeado
     resumen = []
     if not df_filtrado.empty:
         resumen = procesar_aliados(df_filtrado)
     
-    # Procesar aliados no mapeados
     resumen_no_mapeados = None
     if not df_no_mapeados.empty:
         resumen_no_mapeados = procesar_no_mapeados(df_no_mapeados)
     
-    # Mostrar resumen
     mostrar_resumen(resumen, resumen_no_mapeados)
 
 if __name__ == "__main__":
