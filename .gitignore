@@ -33,3 +33,5 @@ pru*.py
 # 🧾 Incluir este archivo
 !.gitignore
 !Accesos.txt
+!ControldeActividades/**/
+!ControldeActividades/**/*.py
