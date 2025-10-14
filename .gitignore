@@ -23,15 +23,18 @@ Node/
 # 📁 Ignorar todo por defecto
 *
 
-# ✅ Incluir solo archivos .py
-!*.py
-
-# ❌ Excluir específicamente pruebas.py
-pruebas.py
-pru*.py
-
-# 🧾 Incluir este archivo
+# ✅ Incluir archivos esenciales
 !.gitignore
 !Accesos.txt
+
+# ✅ Incluir todos los archivos .py en cualquier carpeta
+!**/*.py
+
+# ✅ Incluir carpeta ControldeActividades y su contenido
+!ControldeActividades/
 !ControldeActividades/**/
 !ControldeActividades/**/*.py
+
+# ❌ Excluir específicamente pruebas.py y similares
+pruebas.py
+pru*.py
