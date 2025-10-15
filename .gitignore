@@ -34,6 +34,8 @@ Node/
 !proyecto_productividad/
 !proyecto_productividad/**/
 !proyecto_productividad/**/*.py
+!proyecto_productividad/**/*.txt
+!proyecto_productividad/**/*.png
 
 # ❌ Excluir específicamente pruebas.py y similares
 pru*.py
