@@ -153,14 +153,48 @@ def actualizar_archivo_aliado(aliado, df_nuevos):
         app.enable_events = False
         
         wb = app.books.open(ruta_archivo, update_links=False, read_only=False)
-        ws = wb.sheets[0]
-        
-        print(f"  ✓ Archivo abierto: {nombre_archivo}")
         
         # Esperar a que se cargue completamente
+        time.sleep(0.5)
+        
+        # Verificar que el workbook se cargó correctamente
+        if wb is None or wb.api is None:
+            raise Exception("No se pudo cargar el workbook correctamente")
+        
+        ws = wb.sheets[0]
+        print(f"  ✓ Archivo abierto: {nombre_archivo}")
+        
+        # Esperar adicional para asegurar carga de la hoja
         time.sleep(0.3)
         
-        # Desproteger libro - usar try/except independiente
+        # Verificar acceso a ws.api
+        max_intentos = 3
+        intento = 0
+        ws_api_disponible = False
+        
+        while intento < max_intentos and not ws_api_disponible:
+            try:
+                # Intentar acceder a ws.api
+                if ws.api is not None:
+                    _ = ws.api.Name  # Verificar acceso
+                    ws_api_disponible = True
+                    print(f"  ✓ Acceso a API de hoja confirmado")
+                else:
+                    intento += 1
+                    if intento < max_intentos:
+                        print(f"  ⚠ Intento {intento}/{max_intentos}: Esperando acceso a API...")
+                        time.sleep(0.5)
+            except Exception as e:
+                intento += 1
+                if intento < max_intentos:
+                    print(f"  ⚠ Intento {intento}/{max_intentos}: Error al acceder API: {e}")
+                    time.sleep(0.5)
+        
+        if not ws_api_disponible:
+            print(f"  ⚠ Advertencia: No se pudo acceder a ws.api después de {max_intentos} intentos")
+            print(f"  → Continuando con funcionalidad limitada...")
+        
+        # Desproteger libro
         try:
             wb.api.Unprotect(PASSWORD)
             time.sleep(0.1)
@@ -168,28 +202,27 @@ def actualizar_archivo_aliado(aliado, df_nuevos):
         except Exception as e:
             print(f"  ⚠ Advertencia al desproteger libro: {e}")
         
-        # Desproteger hoja - verificar que ws.api existe
-        try:
-            if ws.api is not None:
+        # Desproteger hoja
+        if ws_api_disponible:
+            try:
                 ws.api.Unprotect(PASSWORD)
                 time.sleep(0.1)
                 print(f"  ✓ Hoja desprotegida")
-            else:
-                print(f"  ⚠ Advertencia: No se pudo acceder a ws.api")
-        except Exception as e:
-            print(f"  ⚠ Advertencia al desproteger hoja: {e}")
+            except Exception as e:
+                print(f"  ⚠ Advertencia al desproteger hoja: {e}")
         
         # Encontrar última fila con datos
         try:
-            ultima_fila = ws.api.Cells(ws.api.Rows.Count, 5).End(-4162).Row
-            print(f"  • Última fila con datos: {ultima_fila}")
-        except:
-            try:
+            if ws_api_disponible:
+                ultima_fila = ws.api.Cells(ws.api.Rows.Count, 5).End(-4162).Row
+            else:
+                # Método alternativo sin ws.api
                 ultima_fila = ws.used_range.last_cell.row
-                print(f"  • Última fila con datos: {ultima_fila}")
-            except:
-                ultima_fila = 1
-                print(f"  • No hay datos previos, comenzando desde fila 1")
+            print(f"  • Última fila con datos: {ultima_fila}")
+        except Exception as e:
+            print(f"  ⚠ Error al determinar última fila: {e}")
+            ultima_fila = 1
+            print(f"  • Usando fila inicial: {ultima_fila}")
         
         # Leer contratos existentes
         contratos_existentes = set()
@@ -243,8 +276,8 @@ def actualizar_archivo_aliado(aliado, df_nuevos):
             
             ultima_fila_final = ultima_fila + registros_agregados
         
-        # Aplicar formatos solo si hay datos y ws.api está disponible
-        if ultima_fila_final > 1 and ws.api is not None:
+        # Aplicar formatos solo si ws.api está disponible y hay datos
+        if ultima_fila_final > 1 and ws_api_disponible:
             try:
                 print(f"  • Aplicando formato...")
                 
@@ -276,15 +309,17 @@ def actualizar_archivo_aliado(aliado, df_nuevos):
             
             except Exception as e:
                 print(f"  ⚠ Error al aplicar formatos: {e}")
+        elif ultima_fila_final > 1 and not ws_api_disponible:
+            print(f"  ⚠ Formatos no aplicados (API no disponible)")
         
-        # Proteger hoja con parámetros correctos para xlwings
-        try:
-            if ws.api is not None:
+        # Proteger hoja
+        if ws_api_disponible:
+            try:
                 ws.api.Protect(Password=PASSWORD, Contents=True)
                 time.sleep(0.1)
                 print(f"  ✓ Hoja protegida")
-        except Exception as e:
-            print(f"  ⚠ Error al proteger hoja: {e}")
+            except Exception as e:
+                print(f"  ⚠ Error al proteger hoja: {e}")
         
         # Proteger libro
         try:
@@ -320,16 +355,22 @@ def actualizar_archivo_aliado(aliado, df_nuevos):
         return None
     
     finally:
+        # Cerrar con manejo de errores robusto
         if wb:
             try:
                 wb.close()
-            except:
-                pass
+                time.sleep(0.3)
+            except Exception as e:
+                print(f"  ⚠ Error al cerrar workbook: {e}")
+        
         if app:
             try:
                 app.quit()
-            except:
-                pass
+                time.sleep(0.3)
+            except Exception as e:
+                print(f"  ⚠ Error al cerrar Excel: {e}")
+        
+        # Espera final para asegurar liberación de recursos
         time.sleep(0.5)
 
 def procesar_aliados(df_filtrado):
