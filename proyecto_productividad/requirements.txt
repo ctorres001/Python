@@ -1,0 +1,5 @@
+streamlit
+psycopg2-binary  # Driver de PostgreSQL para Neon
+pandas           # Para manejar los datos en los dashboards
+passlib[bcrypt]  # Para hashing seguro de contraseñas
+streamlit-option-menu # Para una mejor navegación (opcional pero recomendado)
