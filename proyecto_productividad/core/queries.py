@@ -2,8 +2,12 @@ import streamlit as st
 from datetime import datetime
 from sqlalchemy import text
 import pandas as pd
+from core.engine_connection import get_engine
 
-# --- Consultas de Usuario y Autenticación ---
+
+# ======================================================
+# 🧩 CONSULTAS DE USUARIO Y AUTENTICACIÓN
+# ======================================================
 
 def get_user_by_username(conn, username):
     """Obtiene la información completa de un usuario, su rol y campaña."""
@@ -20,11 +24,15 @@ def get_user_by_username(conn, username):
     )
     return df.to_dict('records')[0] if not df.empty else None
 
-# --- Consultas del Asesor ---
+
+# ======================================================
+# 🧩 CONSULTAS DEL ASESOR
+# ======================================================
 
 def get_active_activities(conn):
-    """Obtiene todas las actividades que están marcadas como activas."""
+    """Obtiene todas las actividades activas."""
     return conn.query("SELECT * FROM actividades WHERE activo = TRUE ORDER BY id", ttl=600)
+
 
 def get_last_activity_status(conn, user_id):
     """Obtiene el último registro de actividad de un usuario."""
@@ -42,68 +50,50 @@ def get_last_activity_status(conn, user_id):
     )
     return df.to_dict('records')[0] if not df.empty else None
 
-def stop_activity(conn, registro_id, hora_fin):
-    """
-    Finaliza una actividad.
-    ✅ CORREGIDO: Usar raw SQLAlchemy en lugar de conn.session
-    """
-    with conn.engine.connect() as direct_conn:
-        direct_conn.execute(
-            text("""
-            UPDATE registro_actividades 
-            SET 
-                hora_fin = :hora_fin, 
-                estado = 'Finalizado',
-                duracion_seg = EXTRACT(EPOCH FROM (:hora_fin - hora_inicio)),
-                duracion_hms = (:hora_fin - hora_inicio)
-            WHERE id = :registro_id
-            """),
-            params={"registro_id": registro_id, "hora_fin": hora_fin}
-        )
-        direct_conn.commit()
 
 def start_activity(conn, user_id, actividad_id, hora_inicio):
-    """
-    Inicia una nueva actividad y devuelve el ID del nuevo registro.
-    ✅ CORREGIDO: Usar raw SQLAlchemy
-    """
+    """Inicia una nueva actividad y devuelve el ID."""
+    import sys
+    engine = get_engine()
     try:
-        # Opción 1: Si tu BD soporta RETURNING
-        df = conn.query(
-            """
-            INSERT INTO registro_actividades (usuario_id, actividad_id, fecha, hora_inicio, estado) 
-            VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, 'Iniciado')
-            RETURNING id
-            """,
-            params={"user_id": user_id, "actividad_id": actividad_id, "hora_inicio": hora_inicio},
-            ttl=0
-        )
-        return df.to_dict('records')[0]['id']
-    except Exception as e:
-        print(f"⚠️ RETURNING no soportado, intentando alternativa: {e}")
-        # Opción 2: INSERT sin RETURNING + query posterior
-        with conn.engine.connect() as direct_conn:
-            direct_conn.execute(
+        with engine.begin() as connection:
+            result = connection.execute(
                 text("""
-                INSERT INTO registro_actividades (usuario_id, actividad_id, fecha, hora_inicio, estado) 
-                VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, 'Iniciado')
+                    INSERT INTO public.registro_actividades 
+                    (usuario_id, actividad_id, fecha, hora_inicio, estado) 
+                    VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, 'Iniciado')
+                    RETURNING id
                 """),
-                params={"user_id": user_id, "actividad_id": actividad_id, "hora_inicio": hora_inicio}
+                {"user_id": user_id, "actividad_id": actividad_id, "hora_inicio": hora_inicio}
             )
-            direct_conn.commit()
-        
-        # Obtener el ID del registro recién creado
-        df = conn.query(
-            """
-            SELECT id FROM registro_actividades 
-            WHERE usuario_id = :user_id 
-            ORDER BY id DESC 
-            LIMIT 1
-            """,
-            params={"user_id": user_id},
-            ttl=0
-        )
-        return df.to_dict('records')[0]['id']
+            registro_id = result.scalar()
+            print(f"DEBUG: INSERT confirmado con engine, ID: {registro_id}", file=sys.stderr)
+            return registro_id
+    except Exception as e:
+        print(f"Error en start_activity (engine): {e}", file=sys.stderr)
+        raise
+
+
+def stop_activity(conn, registro_id, hora_fin):
+    """Finaliza una actividad y calcula duración."""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    UPDATE public.registro_actividades 
+                    SET 
+                        hora_fin = :hora_fin, 
+                        estado = 'Finalizado',
+                        duracion_seg = EXTRACT(EPOCH FROM (:hora_fin - hora_inicio)),
+                        duracion_hms = (:hora_fin - hora_inicio)
+                    WHERE id = :registro_id
+                """),
+                {"registro_id": registro_id, "hora_fin": hora_fin}
+            )
+    except Exception as e:
+        raise Exception(f"Error en stop_activity: {str(e)}")
+
 
 def get_today_summary(conn, user_id):
     """Obtiene el resumen de tiempo por actividad para hoy."""
@@ -124,6 +114,7 @@ def get_today_summary(conn, user_id):
         ttl=0
     )
 
+
 def get_today_log(conn, user_id):
     """Obtiene el historial de actividades del día."""
     return conn.query(
@@ -143,7 +134,10 @@ def get_today_log(conn, user_id):
         ttl=0
     )
 
-# --- Consultas del Supervisor ---
+
+# ======================================================
+# 🧩 CONSULTAS DEL SUPERVISOR
+# ======================================================
 
 def get_supervisor_dashboard(conn, campaña_id, fecha):
     """Obtiene el resumen de asesores de una campaña para una fecha."""
@@ -186,7 +180,10 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
         ttl=60
     )
 
-# --- Consultas del Administrador ---
+
+# ======================================================
+# 🧩 CONSULTAS DEL ADMINISTRADOR
+# ======================================================
 
 def get_all_users_admin(conn):
     """Obtiene todos los usuarios para administración."""
@@ -197,12 +194,14 @@ def get_all_users_admin(conn):
         LEFT JOIN campañas c ON u.campaña_id = c.id
         ORDER BY u.nombre_completo
     """, ttl=10)
-    
+
+
 def get_dropdown_data(conn):
     """Obtiene roles y campañas para dropdowns."""
     roles = conn.query("SELECT id, nombre FROM roles", ttl=3600)
     campañas = conn.query("SELECT id, nombre FROM campañas", ttl=3600)
     return roles.to_dict('records'), campañas.to_dict('records')
+
 
 def check_username_exists(conn, username: str) -> bool:
     """Verifica si un usuario ya existe."""
@@ -213,27 +212,36 @@ def check_username_exists(conn, username: str) -> bool:
     )
     return not df.empty
 
+
 def update_user_admin(conn, user_id, nombre_completo, rol_id, campaña_id, estado):
     """Actualiza información de un usuario."""
-    with conn.engine.connect() as direct_conn:
-        direct_conn.execute(
-            text("""
-            UPDATE usuarios 
-            SET nombre_completo = :nc, rol_id = :ri, campaña_id = :ci, estado = :e
-            WHERE id = :uid
-            """),
-            params={"nc": nombre_completo, "ri": rol_id, "ci": campaña_id, "e": estado, "uid": user_id}
-        )
-        direct_conn.commit()
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    UPDATE public.usuarios 
+                    SET nombre_completo = :nc, rol_id = :ri, campaña_id = :ci, estado = :e
+                    WHERE id = :uid
+                """),
+                {"nc": nombre_completo, "ri": rol_id, "ci": campaña_id, "e": estado, "uid": user_id}
+            )
+    except Exception as e:
+        raise Exception(f"Error en update_user_admin: {str(e)}")
+
 
 def create_user_admin(conn, username, password, nombre_completo, rol_id, campaña_id):
     """Crea un nuevo usuario."""
-    with conn.engine.connect() as direct_conn:
-        direct_conn.execute(
-            text("""
-            INSERT INTO usuarios (nombre_usuario, contraseña, nombre_completo, rol_id, campaña_id)
-            VALUES (:u, :p, :nc, :ri, :ci)
-            """),
-            params={"u": username, "p": password, "nc": nombre_completo, "ri": rol_id, "ci": campaña_id}
-        )
-        direct_conn.commit()
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    INSERT INTO public.usuarios 
+                    (nombre_usuario, contraseña, nombre_completo, rol_id, campaña_id)
+                    VALUES (:u, :p, :nc, :ri, :ci)
+                """),
+                {"u": username, "p": password, "nc": nombre_completo, "ri": rol_id, "ci": campaña_id}
+            )
+    except Exception as e:
+        raise Exception(f"Error en create_user_admin: {str(e)}")

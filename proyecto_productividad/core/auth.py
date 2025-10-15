@@ -1,6 +1,13 @@
 import re
 import streamlit as st
+from sqlalchemy import text
 from core.queries import get_user_by_username
+from core.engine_connection import get_engine
+
+
+# ======================================================
+# 🔐 VALIDACIÓN DE CONTRASEÑAS
+# ======================================================
 
 def is_strong_password(password: str) -> bool:
     """
@@ -21,6 +28,10 @@ def is_strong_password(password: str) -> bool:
     return True
 
 
+# ======================================================
+# 👤 AUTENTICACIÓN DE USUARIO
+# ======================================================
+
 def authenticate_user(conn, username: str, password: str):
     """
     Valida usuario y contraseña contra la base de datos.
@@ -31,21 +42,52 @@ def authenticate_user(conn, username: str, password: str):
     if not user:
         return None
 
-    # ✅ Comparación de contraseña en texto plano
+    # ✅ Comparación directa (sin hash)
     if user['contraseña'] != password:
         return None
 
+    # ✅ Validación de estado
     if not user['estado']:
         st.warning("⚠️ Tu usuario está inactivo. Contacta al administrador.")
         return None
 
-    # Validación adicional opcional (solo aviso, no bloquea)
+    # ✅ Advertencia si la contraseña es débil (solo aviso)
     if not is_strong_password(password):
-        st.info("🔐 La contraseña actual no cumple los requisitos de seguridad mínimos.")
+        st.info("🔐 Tu contraseña no cumple los requisitos mínimos de seguridad.")
         st.info("Por favor, contacta al administrador para actualizarla.")
-        
+
     return user
 
+
+# ======================================================
+# 💾 REGISTRO / CREACIÓN DIRECTA (para admins)
+# ======================================================
+
+def register_user(username: str, password: str, nombre_completo: str, rol_id: int, campaña_id: int):
+    """
+    Crea un nuevo usuario directamente en la base de datos.
+    Se usa motor SQLAlchemy para garantizar persistencia en Neon.
+    """
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    INSERT INTO public.usuarios 
+                    (nombre_usuario, contraseña, nombre_completo, rol_id, campaña_id, estado)
+                    VALUES (:u, :p, :nc, :ri, :ci, TRUE)
+                """),
+                {"u": username, "p": password, "nc": nombre_completo, "ri": rol_id, "ci": campaña_id}
+            )
+        return True
+    except Exception as e:
+        st.error(f"Error al registrar usuario: {str(e)}")
+        return False
+
+
+# ======================================================
+# 🧭 GESTIÓN DE SESIÓN
+# ======================================================
 
 def login_user(user: dict):
     """Guarda la información del usuario en la sesión de Streamlit."""

@@ -14,7 +14,6 @@ def format_timedelta(td):
 def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
     """
     Lógica central para detener la actividad anterior e iniciar la nueva.
-    ✅ CORREGIDO: Mejor manejo de estado y caché
     """
     now = datetime.now()
 
@@ -23,7 +22,8 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
         try:
             queries.stop_activity(conn, st.session_state['current_registro_id'], now)
         except Exception as e:
-            st.error(f"Error al detener actividad: {e}")
+            # Guardar error en session_state para mostrarlo permanentemente
+            st.session_state['last_error'] = f"Error al detener actividad: {str(e)}"
             return
 
     # 2. Manejar "Salida" (es un evento final)
@@ -36,9 +36,10 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
             st.session_state['current_activity_name'] = "Jornada Finalizada"
             st.session_state['current_start_time'] = None
             st.session_state['current_registro_id'] = None
-            st.success("Has marcado tu Salida. ¡Jornada finalizada!")
+            st.session_state['last_success'] = "Has marcado tu Salida. ¡Jornada finalizada!"
+            st.session_state.pop('last_error', None)
         except Exception as e:
-            st.error(f"Error al marcar salida: {e}")
+            st.session_state['last_error'] = f"Error al marcar salida: {str(e)}"
             return
     
     # 3. Iniciar nueva actividad (si no es "Salida")
@@ -50,22 +51,35 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
             st.session_state['current_activity_name'] = new_activity_name
             st.session_state['current_start_time'] = now
             st.session_state['current_registro_id'] = new_reg_id
-            
-            st.success(f"✅ Actividad iniciada: {new_activity_name}")
+            st.session_state['last_success'] = f"✅ Actividad iniciada: {new_activity_name}"
+            st.session_state.pop('last_error', None)
         except Exception as e:
-            st.error(f"Error al iniciar actividad: {e}")
+            st.session_state['last_error'] = f"Error al iniciar actividad: {str(e)}"
             return
 
-    # ✅ Limpiar SOLO el caché de queries, no todo
+    # Limpiar caché
     st.cache_data.clear()
 
 def show_asesor_dashboard(conn):
     user = st.session_state['user_info']
     st.title(f"Panel de Asesor: {user['nombre_completo']}")
     st.caption(f"Campaña: {user.get('campaña_nombre', 'N/A')}")
+    
+    # Mostrar mensajes persistentes
+    if 'last_error' in st.session_state:
+        st.error(st.session_state['last_error'])
+        if st.button("Limpiar error"):
+            st.session_state.pop('last_error')
+            st.rerun()
+    
+    if 'last_success' in st.session_state:
+        st.success(st.session_state['last_success'])
+        # Auto-limpiar después de mostrar
+        st.session_state.pop('last_success', None)
+    
     st.divider()
 
-    # --- Inicializar estado si no existe ---
+    # Inicializar estado si no existe
     if 'current_activity_id' not in st.session_state:
         st.session_state['current_activity_id'] = None
     if 'current_activity_name' not in st.session_state:
@@ -75,7 +89,7 @@ def show_asesor_dashboard(conn):
     if 'current_registro_id' not in st.session_state:
         st.session_state['current_registro_id'] = None
 
-    # --- Sección del Cronómetro ---
+    # Sección del Cronómetro
     st.subheader("Actividad Actual")
     placeholder = st.empty()
     
@@ -98,7 +112,7 @@ def show_asesor_dashboard(conn):
 
     st.divider()
 
-    # --- Sección de Botones de Actividad ---
+    # Sección de Botones de Actividad
     st.subheader("Registrar Actividad")
     
     try:
@@ -111,7 +125,7 @@ def show_asesor_dashboard(conn):
         st.warning("No hay actividades disponibles.")
         return
     
-    # Definimos las columnas para los botones
+    # Definir columnas para los botones
     num_cols = 4
     cols = st.columns(num_cols)
     
@@ -120,7 +134,7 @@ def show_asesor_dashboard(conn):
         activity_id = row['id']
         activity_name = row['nombre_actividad']
         
-        # ✅ Deshabilitar el botón si es la actividad actual o si la jornada terminó
+        # Deshabilitar si es la actividad actual o si terminó la jornada
         disabled = (activity_id == st.session_state.get('current_activity_id') or 
                     st.session_state.get('current_activity_name') == "Jornada Finalizada")
         
@@ -130,7 +144,7 @@ def show_asesor_dashboard(conn):
 
     st.divider()
 
-    # --- Sección de Estadísticas del Día ---
+    # Sección de Estadísticas del Día
     st.subheader("Resumen del Día")
     
     try:
@@ -156,8 +170,7 @@ def show_asesor_dashboard(conn):
     except Exception as e:
         st.warning(f"No se pudo cargar el histórico: {e}")
 
-    # --- Lógica de "Tiempo Real" ---
-    # ✅ Solo rerun si hay una actividad en progreso
-    if st.session_state.get('current_registro_id'):
+    # Lógica de "Tiempo Real" solo si hay actividad en progreso y NO hay errores
+    if st.session_state.get('current_registro_id') and 'last_error' not in st.session_state:
         time.sleep(1)
         st.rerun()
