@@ -30,11 +30,12 @@ Node/
 # ✅ Incluir todos los archivos .py en cualquier carpeta
 !**/*.py
 
-# ✅ Incluir carpeta ControldeActividades y su contenido
-!ControldeActividades/
-!ControldeActividades/**/
-!ControldeActividades/**/*.py
+# ✅ Incluir carpeta proyecto_productividad y su contenido
+!proyecto_productividad/
+!proyecto_productividad/**/
+!proyecto_productividad/**/*.py
 
 # ❌ Excluir específicamente pruebas.py y similares
-pruebas.py
 pru*.py
+proyecto_productividad/.streamlit/
+proyecto_productividad/.streamlit/secrets.toml
