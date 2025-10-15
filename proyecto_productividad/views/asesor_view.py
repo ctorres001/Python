@@ -1,7 +1,6 @@
 import streamlit as st
 from core import queries
-from datetime import datetime
-import time
+from datetime import datetime, time as dt_time
 import pandas as pd
 from streamlit.components.v1 import html
 
@@ -15,9 +14,9 @@ def format_timedelta(td):
 def inject_timer_script(start_timestamp):
     """Inyecta JavaScript para cronómetro sin refresh visible"""
     timer_html = f"""
-    <div id="timer-container" style="font-size: 2.5rem; font-weight: 700; color: #1f77b4; text-align: center; padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <div style="font-size: 0.9rem; font-weight: 400; opacity: 0.9; margin-bottom: 0.5rem;">⏱️ Tiempo Transcurrido</div>
-        <div id="timer-display">00:00:00</div>
+    <div id="timer-container" style="font-size: 2rem; font-weight: 600; color: white; text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%); border-radius: 16px; box-shadow: 0 8px 16px rgba(74, 144, 226, 0.3);">
+        <div style="font-size: 0.85rem; font-weight: 400; opacity: 0.95; margin-bottom: 0.5rem; letter-spacing: 0.5px;">TIEMPO TRANSCURRIDO</div>
+        <div id="timer-display" style="font-size: 2.5rem; font-weight: 700; letter-spacing: 2px;">00:00:00</div>
     </div>
     <script>
         const startTime = {start_timestamp};
@@ -43,7 +42,50 @@ def inject_timer_script(start_timestamp):
     """
     return timer_html
 
-def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
+def check_and_close_day(conn, user_id):
+    """Cierra automáticamente las actividades al finalizar el día (23:59:59)"""
+    now = datetime.now()
+    
+    if st.session_state.get('current_registro_id'):
+        current_start = st.session_state.get('current_start_time')
+        
+        # Si el día cambió, cerrar actividad del día anterior a las 23:59:59
+        if current_start and current_start.date() < now.date():
+            end_of_previous_day = datetime.combine(current_start.date(), dt_time(23, 59, 59))
+            try:
+                queries.stop_activity(conn, st.session_state['current_registro_id'], end_of_previous_day)
+                st.session_state['current_activity_id'] = None
+                st.session_state['current_activity_name'] = '---'
+                st.session_state['current_start_time'] = None
+                st.session_state['current_registro_id'] = None
+                st.session_state['current_subactivity'] = None
+                st.session_state['current_comment'] = None
+                st.info("✅ Jornada anterior cerrada automáticamente a las 23:59:59")
+            except Exception as e:
+                st.error(f"Error al cerrar jornada anterior: {e}")
+
+def restore_open_activity(conn, user_id):
+    """Restaura actividad abierta si existe al recargar la página"""
+    if 'activity_restored' not in st.session_state:
+        try:
+            open_activity = queries.get_open_activity(conn, user_id)
+            
+            if open_activity is not None and not open_activity.empty:
+                row = open_activity.iloc[0]
+                st.session_state['current_registro_id'] = row['id']
+                st.session_state['current_activity_id'] = row['actividad_id']
+                st.session_state['current_activity_name'] = row['nombre_actividad']
+                st.session_state['current_start_time'] = row['hora_inicio']
+                st.session_state['current_subactivity'] = row.get('subactividad', None)
+                st.session_state['current_comment'] = row.get('comentario', None)
+                st.success(f"🔄 Actividad restaurada: {row['nombre_actividad']}")
+            
+            st.session_state['activity_restored'] = True
+        except Exception as e:
+            st.warning(f"No se pudo restaurar actividad: {e}")
+            st.session_state['activity_restored'] = True
+
+def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, subactivity=None, comment=None):
     """
     Lógica central para detener la actividad anterior e iniciar la nueva.
     """
@@ -60,15 +102,18 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
     # 2. Manejar "Salida" (es un evento final)
     if new_activity_name == 'Salida':
         try:
-            reg_id = queries.start_activity(conn, user_id, new_activity_id, now)
+            reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity, comment)
             queries.stop_activity(conn, reg_id, now)
             
             st.session_state['current_activity_id'] = None
             st.session_state['current_activity_name'] = "Jornada Finalizada"
             st.session_state['current_start_time'] = None
             st.session_state['current_registro_id'] = None
-            st.session_state['last_success'] = "Has marcado tu Salida. ¡Jornada finalizada!"
+            st.session_state['current_subactivity'] = None
+            st.session_state['current_comment'] = None
+            st.session_state['last_success'] = "✅ Has marcado tu Salida. ¡Jornada finalizada!"
             st.session_state.pop('last_error', None)
+            st.session_state.pop('show_subactivity_modal', None)
         except Exception as e:
             st.session_state['last_error'] = f"Error al marcar salida: {str(e)}"
             return
@@ -76,14 +121,19 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
     # 3. Iniciar nueva actividad (si no es "Salida")
     else:
         try:
-            new_reg_id = queries.start_activity(conn, user_id, new_activity_id, now)
+            new_reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity, comment)
             
             st.session_state['current_activity_id'] = new_activity_id
             st.session_state['current_activity_name'] = new_activity_name
             st.session_state['current_start_time'] = now
             st.session_state['current_registro_id'] = new_reg_id
-            st.session_state['last_success'] = f"✅ Actividad iniciada: {new_activity_name}"
+            st.session_state['current_subactivity'] = subactivity
+            st.session_state['current_comment'] = comment
+            
+            subact_text = f" - {subactivity}" if subactivity else ""
+            st.session_state['last_success'] = f"✅ Actividad iniciada: {new_activity_name}{subact_text}"
             st.session_state.pop('last_error', None)
+            st.session_state.pop('show_subactivity_modal', None)
         except Exception as e:
             st.session_state['last_error'] = f"Error al iniciar actividad: {str(e)}"
             return
@@ -91,90 +141,221 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name):
     st.cache_data.clear()
 
 def get_activity_color(activity_name):
-    """Retorna color según el tipo de actividad"""
+    """Retorna color suave según el tipo de actividad"""
     colors = {
-        'Seguimiento': '#c7f0db',
-        'Caso Nuevo': '#d4d4f7',
-        'Reportaría': '#ffeaa7',
-        'Pausa': '#b8e6e6',
-        'Auxiliares': '#ffd7d7',
-        'Reunión': '#e1d4f7',
-        'Salida': '#dfe6e9'
+        'Seguimiento': '#C8E6C9',
+        'Bandeja de correo': '#BBDEFB',
+        'Reportes': '#FFE0B2',
+        'Pausa': '#B2EBF2',
+        'Auxiliares': '#F8BBD0',
+        'Reunión': '#E1BEE7',
+        'Salida': '#CFD8DC'
     }
-    return colors.get(activity_name, '#f0f0f0')
+    return colors.get(activity_name, '#F5F5F5')
+
+def show_subactivity_modal(conn, activity_id, activity_name):
+    """Muestra modal con selector de subactividad desde BD y campo de comentario"""
+    st.markdown("---")
+    st.markdown(f"### 📋 Detalles de {activity_name}")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**Subactividad**")
+        
+        # Obtener subactividades desde la base de datos
+        try:
+            subact_df = queries.get_subactivities(conn, activity_id)
+            
+            if not subact_df.empty:
+                # Crear diccionario {nombre: id}
+                options_dict = dict(zip(subact_df['nombre_subactividad'], subact_df['id']))
+                
+                selected_name = st.selectbox(
+                    "Tipo de gestión:",
+                    list(options_dict.keys()),
+                    key=f"subact_{activity_name}_{activity_id}",
+                    label_visibility="collapsed"
+                )
+                selected_subactivity_id = options_dict[selected_name]
+            else:
+                st.warning("⚠️ No hay subactividades configuradas para esta actividad")
+                selected_subactivity_id = None
+        except Exception as e:
+            st.error(f"Error al cargar subactividades: {e}")
+            selected_subactivity_id = None
+    
+    with col2:
+        st.markdown("**ID Cliente / Referencia**")
+        client_ref = st.text_input(
+            "ID Cliente:",
+            placeholder="Ej: CLI-0003",
+            key=f"client_{activity_name}_{activity_id}",
+            label_visibility="collapsed",
+            max_chars=50
+        )
+    
+    st.markdown("**Resumen breve**")
+    comment = st.text_area(
+        "Describe brevemente la actividad:",
+        placeholder="Ej: Atención de reclamo por facturación incorrecta del mes anterior...",
+        key=f"comment_{activity_name}_{activity_id}",
+        label_visibility="collapsed",
+        max_chars=250,
+        height=100
+    )
+    
+    # Combinar referencia y comentario
+    full_comment = ""
+    if client_ref:
+        full_comment += f"[{client_ref}] "
+    if comment:
+        full_comment += comment
+    
+    st.markdown("---")
+    
+    return selected_subactivity_id, full_comment if full_comment else None
 
 def show_asesor_dashboard(conn):
     user = st.session_state['user_info']
+    user_id = user['id']
     
-    # CSS personalizado
+    # Restaurar actividad abierta al cargar
+    restore_open_activity(conn, user_id)
+    
+    # Verificar y cerrar día si cambió
+    check_and_close_day(conn, user_id)
+    
+    # CSS personalizado con azul corporativo
     st.markdown("""
     <style>
+        .block-container {
+            padding-top: 2rem;
+        }
+        
         .main-header {
-            font-size: 2rem;
+            font-size: 1.8rem;
             font-weight: 700;
-            color: #2c3e50;
-            margin-bottom: 0.5rem;
+            color: #1E3A5F;
+            margin-bottom: 0.3rem;
         }
+        
         .sub-header {
-            color: #7f8c8d;
-            font-size: 1rem;
-            margin-bottom: 2rem;
-        }
-        .status-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            color: #6B7280;
+            font-size: 0.95rem;
             margin-bottom: 1.5rem;
         }
-        .activity-button {
-            height: 60px !important;
-            font-size: 1rem !important;
-            font-weight: 600 !important;
-            border-radius: 8px !important;
-            transition: all 0.3s ease !important;
-        }
+        
         .section-title {
-            font-size: 1.3rem;
+            font-size: 1.1rem;
             font-weight: 600;
-            color: #2c3e50;
-            margin: 2rem 0 1rem 0;
+            color: #1E3A5F;
+            margin: 1.5rem 0 1rem 0;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
-        .timeline-item {
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-            display: flex;
-            justify-content: space-between;
+        
+        .current-activity-badge {
+            display: inline-flex;
             align-items: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .timeline-activity {
+            gap: 0.5rem;
+            background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 24px;
             font-weight: 600;
             font-size: 1rem;
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.25);
         }
+        
+        .timeline-item {
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            margin-bottom: 0.75rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .timeline-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+        
+        .timeline-activity {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: #1E3A5F;
+            margin-bottom: 0.25rem;
+        }
+        
+        .timeline-subactivity {
+            font-size: 0.85rem;
+            color: #6B7280;
+            font-style: italic;
+            margin-bottom: 0.25rem;
+        }
+        
+        .timeline-comment {
+            font-size: 0.8rem;
+            color: #9CA3AF;
+            margin-top: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            background: rgba(255,255,255,0.5);
+            border-radius: 6px;
+        }
+        
         .timeline-time {
             font-weight: 700;
-            font-size: 1.1rem;
+            font-size: 1rem;
+            color: #4A90E2;
+            margin-top: 0.5rem;
         }
-        .current-activity-badge {
-            display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 1.1rem;
-            margin-bottom: 1rem;
+        
+        .stButton > button {
+            border-radius: 12px !important;
+            font-weight: 600 !important;
+            transition: all 0.3s ease !important;
+            border: 2px solid transparent !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+        }
+        
+        .stButton > button:hover:not(:disabled) {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3) !important;
+            border-color: #4A90E2 !important;
+        }
+        
+        .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%) !important;
+            color: white !important;
+        }
+        
+        .stButton > button:disabled {
+            opacity: 0.5 !important;
+            cursor: not-allowed !important;
+        }
+        
+        [data-testid="stMetricValue"] {
+            font-size: 1.8rem;
+            color: #4A90E2;
+        }
+        
+        * {
+            transition: all 0.2s ease;
+        }
+        
+        .modal-container {
+            background: #F9FAFB;
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 2px solid #E5E7EB;
         }
     </style>
     """, unsafe_allow_html=True)
     
     # Header
-    st.markdown(f'<div class="main-header">🎯 Control de Actividades</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-header">Control de Actividades</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="sub-header">{user["nombre_completo"]} • {user.get("campaña_nombre", "N/A")}</div>', unsafe_allow_html=True)
     
     # Mostrar mensajes
@@ -197,29 +378,68 @@ def show_asesor_dashboard(conn):
         st.session_state['current_start_time'] = None
     if 'current_registro_id' not in st.session_state:
         st.session_state['current_registro_id'] = None
+    if 'current_subactivity' not in st.session_state:
+        st.session_state['current_subactivity'] = None
+    if 'current_comment' not in st.session_state:
+        st.session_state['current_comment'] = None
 
-    # Estado Actual con Cronómetro
+    # Estado Actual
     st.markdown('<div class="section-title">⏰ Estado actual</div>', unsafe_allow_html=True)
     
-    col1, col2 = st.columns([1, 2])
+    activity_display = st.session_state.get('current_activity_name', '---')
+    subactivity_display = st.session_state.get('current_subactivity', '')
     
-    with col1:
-        activity_display = st.session_state.get('current_activity_name', '---')
-        if activity_display != '---' and activity_display != 'Jornada Finalizada':
-            st.markdown(f'<div class="current-activity-badge">{activity_display}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div style="padding: 1rem; color: #7f8c8d; font-size: 1.1rem;">📍 {activity_display}</div>', unsafe_allow_html=True)
+    if activity_display != '---' and activity_display != 'Jornada Finalizada':
+        full_activity = f"{activity_display}"
+        if subactivity_display:
+            full_activity += f" • {subactivity_display}"
+        st.markdown(f'<div class="current-activity-badge">📍 {full_activity}</div>', unsafe_allow_html=True)
+    else:
+        st.info(f"📍 {activity_display}")
     
-    with col2:
-        if st.session_state.get('current_start_time'):
-            start_timestamp = int(st.session_state['current_start_time'].timestamp() * 1000)
-            html(inject_timer_script(start_timestamp), height=120)
-        else:
-            st.markdown('<div style="padding: 2rem; text-align: center; color: #95a5a6; font-size: 1.2rem;">⏸️ Sin actividad en curso</div>', unsafe_allow_html=True)
+    # Cronómetro
+    if st.session_state.get('current_start_time'):
+        start_timestamp = int(st.session_state['current_start_time'].timestamp() * 1000)
+        html(inject_timer_script(start_timestamp), height=110)
+    else:
+        st.markdown("""
+        <div style="padding: 2rem; text-align: center; background: linear-gradient(135deg, #E8F4F8 0%, #D6EAF8 100%); 
+                    border-radius: 16px; color: #5DADE2; font-size: 1.1rem; font-weight: 600;">
+            ⏸️ Sin actividad en curso
+        </div>
+        """, unsafe_allow_html=True)
 
-    # Botones de Actividad
     st.markdown('<div class="section-title">📋 Registrar Actividad</div>', unsafe_allow_html=True)
     
+    # Modal para subactividades
+    if st.session_state.get('show_subactivity_modal'):
+        activity_info = st.session_state['pending_activity']
+        
+        with st.container():
+            st.markdown('<div class="modal-container">', unsafe_allow_html=True)
+            subactivity, comment = show_subactivity_modal(conn, activity_info['id'], activity_info['name'])
+            
+            col1, col2, col3 = st.columns([1, 1, 2])
+            
+            if col1.button("✅ Confirmar", type="primary", use_container_width=True):
+                handle_activity_click(
+                    conn, 
+                    user['id'], 
+                    activity_info['id'], 
+                    activity_info['name'],
+                    subactivity,
+                    comment
+                )
+                st.rerun()
+            
+            if col2.button("❌ Cancelar", use_container_width=True):
+                st.session_state.pop('show_subactivity_modal')
+                st.session_state.pop('pending_activity')
+                st.rerun()
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Botones de actividad
     try:
         activities_df = queries.get_active_activities(conn)
     except Exception as e:
@@ -230,7 +450,6 @@ def show_asesor_dashboard(conn):
         st.warning("No hay actividades disponibles.")
         return
     
-    # Organizar botones en grid
     cols = st.columns(4)
     
     for index, row in activities_df.iterrows():
@@ -241,11 +460,10 @@ def show_asesor_dashboard(conn):
         disabled = (activity_id == st.session_state.get('current_activity_id') or 
                     st.session_state.get('current_activity_name') == "Jornada Finalizada")
         
-        # Emoji según actividad
         emoji_map = {
             'Seguimiento': '📞',
-            'Caso Nuevo': '📋',
-            'Reportaría': '📊',
+            'Bandeja de correo': '📧',
+            'Reportes': '📊',
             'Pausa': '☕',
             'Auxiliares': '🔧',
             'Reunión': '👥',
@@ -257,42 +475,138 @@ def show_asesor_dashboard(conn):
                      key=f"btn_{activity_id}", 
                      use_container_width=True, 
                      disabled=disabled,
-                     type="primary" if not disabled else "secondary"):
-            handle_activity_click(conn, user['id'], activity_id, activity_name)
-            st.rerun()
+                     type="primary"):
+            
+            # Verificar si necesita modal de detalles
+            needs_details = activity_name in ['Seguimiento', 'Bandeja de correo', 'Reportes', 'Auxiliares']
+            
+            if needs_details:
+                st.session_state['show_subactivity_modal'] = True
+                st.session_state['pending_activity'] = {
+                    'id': activity_id,
+                    'name': activity_name
+                }
+                st.rerun()
+            else:
+                handle_activity_click(conn, user['id'], activity_id, activity_name)
+                st.rerun()
 
-    # Totales del día (Gráfico de barras)
-    st.markdown('<div class="section-title">📊 Totales del día</div>', unsafe_allow_html=True)
+    # Resumen Consolidado del Día
+    st.markdown('<div class="section-title">📊 Resumen del día</div>', unsafe_allow_html=True)
     
     try:
-        summary_df = queries.get_today_summary(conn, user['id'])
+        summary_df = queries.get_today_summary(conn, user_id)
         
         if not summary_df.empty:
-            summary_df['minutos_usados'] = summary_df['total_segundos'] / 60
-            st.bar_chart(summary_df.set_index('nombre_actividad')['minutos_usados'], 
-                        height=300)
+            # Calcular totales
+            total_segundos = summary_df['total_segundos'].sum()
+            total_horas = int(total_segundos // 3600)
+            total_minutos = int((total_segundos % 3600) // 60)
+            total_segs = int(total_segundos % 60)
+            
+            # Mostrar métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("⏱️ Tiempo Total", f"{total_horas:02d}:{total_minutos:02d}:{total_segs:02d}")
+            col2.metric("📋 Actividades", len(summary_df))
+            col3.metric("🎯 En Curso", "Sí" if st.session_state.get('current_registro_id') else "No")
+            col4.metric("📅 Fecha", datetime.now().strftime("%d/%m/%Y"))
+            
+            st.markdown("---")
+            
+            # Tabla consolidada
+            st.markdown("**Consolidado por Actividad**")
+            
+            # Formatear datos para mostrar
+            display_df = summary_df.copy()
+            display_df['Tiempo'] = display_df['total_segundos'].apply(
+                lambda x: f"{int(x//3600):02d}:{int((x%3600)//60):02d}:{int(x%60):02d}"
+            )
+            display_df['Porcentaje'] = (display_df['total_segundos'] / total_segundos * 100).round(1)
+            display_df['Porcentaje'] = display_df['Porcentaje'].apply(lambda x: f"{x}%")
+            
+            # Mostrar solo columnas relevantes
+            display_df = display_df[['nombre_actividad', 'Tiempo', 'Porcentaje']]
+            display_df.columns = ['Actividad', 'Tiempo Total (HH:MM:SS)', '% del Día']
+            
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Actividad": st.column_config.TextColumn("Actividad", width="medium"),
+                    "Tiempo Total (HH:MM:SS)": st.column_config.TextColumn("Tiempo Total", width="small"),
+                    "% del Día": st.column_config.TextColumn("% del Día", width="small")
+                }
+            )
+            
+            st.markdown("---")
+            
+            # Gráfico de barras (solo nombres sin modificación manual)
+            st.markdown("**Distribución de Tiempo**")
+            
+            chart_df = summary_df.copy()
+            chart_df['minutos'] = chart_df['total_segundos'] / 60
+            chart_df = chart_df.set_index('nombre_actividad')['minutos']
+            
+            st.bar_chart(
+                chart_df,
+                height=280,
+                use_container_width=True,
+                color='#4A90E2'
+            )
+            
         else:
             st.info("📭 Aún no hay actividades completadas hoy.")
     except Exception as e:
         st.warning(f"No se pudo cargar el resumen: {e}")
 
-    # Línea de tiempo
-    st.markdown('<div class="section-title">🕐 Línea de tiempo</div>', unsafe_allow_html=True)
+    # Línea de tiempo (Histórico detallado)
+    st.markdown('<div class="section-title">🕐 Histórico de Actividades</div>', unsafe_allow_html=True)
     
     try:
-        log_df = queries.get_today_log(conn, user['id'])
+        log_df = queries.get_today_log(conn, user_id)
         
         if not log_df.empty:
+            # Tabla detallada con toda la información
+            st.markdown("**Registro completo del día**")
+            
+            # Crear DataFrame para mostrar
+            display_log = log_df.copy()
+            display_log.columns = ['Actividad', 'Subactividad', 'Comentario', 'Hora Inicio', 'Duración']
+            
+            # Reemplazar valores None con "-"
+            display_log = display_log.fillna('-')
+            
+            st.dataframe(
+                display_log,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Actividad": st.column_config.TextColumn("📋 Actividad", width="medium"),
+                    "Subactividad": st.column_config.TextColumn("📌 Tipo", width="medium"),
+                    "Comentario": st.column_config.TextColumn("💬 Resumen", width="large"),
+                    "Hora Inicio": st.column_config.TextColumn("🕐 Inicio", width="small"),
+                    "Duración": st.column_config.TextColumn("⏱️ Duración", width="small")
+                }
+            )
+            
+            st.markdown("---")
+            
+            # Timeline visual (opcional, más visual)
+            st.markdown("**Línea de Tiempo Visual**")
+            
             for _, row in log_df.iterrows():
                 activity_name = row.get('nombre_actividad', 'N/A')
+                subactivity = row.get('subactividad', '')
+                comment = row.get('comentario', '')
+                inicio = row.get('inicio', '')
                 duration = row.get('duracion', 'En curso')
                 color = get_activity_color(activity_name)
                 
-                # Obtener emoji
                 emoji_map = {
                     'Seguimiento': '📞',
-                    'Caso Nuevo': '📋',
-                    'Reportaría': '📊',
+                    'Bandeja de correo': '📧',
+                    'Reportes': '📊',
                     'Pausa': '☕',
                     'Auxiliares': '🔧',
                     'Reunión': '👥',
@@ -300,20 +614,28 @@ def show_asesor_dashboard(conn):
                 }
                 emoji = emoji_map.get(activity_name, '📌')
                 
-                st.markdown(f"""
+                timeline_html = f"""
                 <div class="timeline-item" style="background-color: {color};">
-                    <div class="timeline-activity">{emoji} {activity_name}</div>
+                    <div style="flex: 1;">
+                        <div class="timeline-activity">{emoji} {activity_name} <span style="color: #6B7280; font-size: 0.85rem;">• {inicio}</span></div>
+                """
+                
+                if subactivity and subactivity != '-':
+                    timeline_html += f'<div class="timeline-subactivity">→ {subactivity}</div>'
+                
+                if comment and comment != '-':
+                    # Truncar comentario si es muy largo
+                    display_comment = comment if len(comment) <= 80 else comment[:77] + "..."
+                    timeline_html += f'<div class="timeline-comment">{display_comment}</div>'
+                
+                timeline_html += f"""
+                    </div>
                     <div class="timeline-time">{duration}</div>
                 </div>
-                """, unsafe_allow_html=True)
+                """
+                
+                st.markdown(timeline_html, unsafe_allow_html=True)
         else:
             st.info("📭 Sin registros hoy.")
     except Exception as e:
         st.warning(f"No se pudo cargar el histórico: {e}")
-
-    # Auto-refresh solo si hay actividad activa y sin errores
-    # Nota: El cronómetro ya no necesita refresh porque funciona con JavaScript
-    # Solo refrescamos ocasionalmente para actualizar datos de BD
-    if st.session_state.get('current_registro_id') and 'last_error' not in st.session_state:
-        time.sleep(30)  # Refresh cada 30 segundos solo para sincronizar BD
-        st.rerun()
