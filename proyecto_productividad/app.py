@@ -2,6 +2,7 @@ import streamlit as st
 from core import auth, queries
 from core.db_connection import get_db_connection
 from views import login_view, asesor_view, supervisor_view, admin_view
+import streamlit as st
 
 # ==============================
 # ⚙️ CONFIGURACIÓN INICIAL
@@ -16,8 +17,11 @@ st.set_page_config(
 # Agregar esto:
 hide_streamlit_style = """
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .stActionButton {visibility: hidden;}
+        .st-emotion-cache-1avcm0n {display: none;}  /* GitHub link */
     </style>
     """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
