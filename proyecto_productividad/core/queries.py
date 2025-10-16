@@ -30,8 +30,9 @@ def get_user_by_username(conn, username):
 # ======================================================
 
 def get_active_activities(conn):
-    """Obtiene todas las actividades activas."""
-    return conn.query("SELECT * FROM actividades WHERE activo = TRUE ORDER BY id", ttl=600) # CAMBIO AQUÍ
+    """Obtiene todas las actividades activas, ordenadas."""
+    # CAMBIO AQUÍ: Ordenar por 'orden', y luego por 'id' como desempate
+    return conn.query("SELECT * FROM actividades WHERE activo = TRUE ORDER BY orden, id", ttl=600)
 
 
 def get_subactivities(conn, activity_id):
@@ -82,7 +83,7 @@ def get_last_activity_status(conn, user_id):
     return df.to_dict('records')[0] if not df.empty else None
 
 
-def get_open_activity(conn, user_id):
+def get_open_activity(conn, user_id, date):
     """
     Obtiene la actividad abierta del usuario (si existe).
     Solo busca actividades del día actual sin hora_fin.
@@ -106,7 +107,7 @@ def get_open_activity(conn, user_id):
         ORDER BY r.hora_inicio DESC
         LIMIT 1
         """,
-        params={"user_id": user_id},
+        params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
         ttl=0
     )
     return df if not df.empty else pd.DataFrame()
@@ -197,7 +198,7 @@ def close_previous_day_activities(conn, user_id, previous_date):
         raise Exception(f"Error en close_previous_day_activities: {str(e)}")
 
 
-def get_today_summary(conn, user_id):
+def get_today_summary(conn, user_id, date):
     """
     Obtiene el resumen consolidado del día con totales por actividad.
     Incluye actividades en curso calculando hasta el momento actual.
@@ -221,7 +222,7 @@ def get_today_summary(conn, user_id):
         GROUP BY a.nombre_actividad
         ORDER BY total_segundos DESC
         """,
-        params={"user_id": user_id},
+        params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
         ttl=0
     )
     return df
@@ -230,7 +231,7 @@ def get_today_summary(conn, user_id):
 # Archivo: queries.py
 # Función: get_today_log
 
-def get_today_log(conn, user_id):
+def get_today_log(conn, user_id, date):
     """
     Obtiene el log detallado del día con todas las actividades.
     Incluye subactividad y comentario.
@@ -253,7 +254,7 @@ def get_today_log(conn, user_id):
           AND r.fecha = CURRENT_DATE
         ORDER BY r.hora_inicio DESC
         """,
-        params={"user_id": user_id},
+        params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
         ttl=0
     )
     return df

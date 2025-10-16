@@ -110,7 +110,7 @@ def show_user_management(conn):
             "estado": st.column_config.CheckboxColumn("Activo?", required=True),
         },
         hide_index=True,
-        width="stretch",  # reemplaza use_container_width
+        width="stretch",
         num_rows="fixed"
     )
 

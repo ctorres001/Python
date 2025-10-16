@@ -137,7 +137,7 @@ def show_login_view():
         st.markdown('</div>', unsafe_allow_html=True)
         
         # Botón centrado
-        submitted = st.form_submit_button("Ingresar", use_container_width=False)
+        submitted = st.form_submit_button("Ingresar", width='content')
 
         if submitted:
             if not username or not password:

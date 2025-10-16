@@ -27,4 +27,4 @@ def show_supervisor_dashboard(conn):
             col1.metric("Asesores en Campaña", total_asesores)
             col2.metric("Fecha de Reporte", selected_date.strftime("%Y-%m-%d"))
 
-            st.dataframe(data_df, use_container_width=True)
+            st.dataframe(data_df, width='stretch')

@@ -3,16 +3,16 @@ from core import queries
 from datetime import datetime, time as dt_time
 import pandas as pd
 from streamlit.components.v1 import html
+from html import escape
 
+# --- Utilidades ---
 def format_timedelta(td):
-    """Formatea un objeto timedelta a HH:MM:SS."""
     total_seconds = int(td.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 def inject_timer_script(start_timestamp):
-    """Inyecta JavaScript para cronómetro sin refresh visible"""
     timer_html = f"""
     <div id="timer-container" style="font-size: 2rem; font-weight: 600; color: white; text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%); border-radius: 16px; box-shadow: 0 8px 16px rgba(74, 144, 226, 0.3);">
         <div style="font-size: 0.85rem; font-weight: 400; opacity: 0.95; margin-bottom: 0.5rem; letter-spacing: 0.5px;">TIEMPO TRANSCURRIDO</div>
@@ -20,22 +20,17 @@ def inject_timer_script(start_timestamp):
     </div>
     <script>
         const startTime = {start_timestamp};
-        
         function updateTimer() {{
             const now = Date.now();
             const elapsed = Math.floor((now - startTime) / 1000);
-            
             const hours = Math.floor(elapsed / 3600);
             const minutes = Math.floor((elapsed % 3600) / 60);
             const seconds = elapsed % 60;
-            
             const display = String(hours).padStart(2, '0') + ':' + 
-                          String(minutes).padStart(2, '0') + ':' + 
-                          String(seconds).padStart(2, '0');
-            
+                            String(minutes).padStart(2, '0') + ':' + 
+                            String(seconds).padStart(2, '0');
             document.getElementById('timer-display').textContent = display;
         }}
-        
         updateTimer();
         setInterval(updateTimer, 1000);
     </script>
@@ -43,13 +38,9 @@ def inject_timer_script(start_timestamp):
     return timer_html
 
 def check_and_close_day(conn, user_id):
-    """Cierra automáticamente las actividades al finalizar el día (23:59:59)"""
     now = datetime.now()
-    
     if st.session_state.get('current_registro_id'):
         current_start = st.session_state.get('current_start_time')
-        
-        # Si el día cambió, cerrar actividad del día anterior a las 23:59:59
         if current_start and current_start.date() < now.date():
             end_of_previous_day = datetime.combine(current_start.date(), dt_time(23, 59, 59))
             try:
@@ -64,12 +55,10 @@ def check_and_close_day(conn, user_id):
             except Exception as e:
                 st.error(f"Error al cerrar jornada anterior: {e}")
 
-def restore_open_activity(conn, user_id):
-    """Restaura actividad abierta si existe al recargar la página"""
+def restore_open_activity(conn, user_id, date):
     if 'activity_restored' not in st.session_state:
         try:
-            open_activity = queries.get_open_activity(conn, user_id)
-            
+            open_activity = queries.get_open_activity(conn, user_id, date)
             if open_activity is not None and not open_activity.empty:
                 row = open_activity.iloc[0]
                 st.session_state['current_registro_id'] = row['id']
@@ -79,32 +68,23 @@ def restore_open_activity(conn, user_id):
                 st.session_state['current_subactivity'] = row.get('subactividad', None)
                 st.session_state['current_comment'] = row.get('comentario', None)
                 st.success(f"🔄 Actividad restaurada: {row['nombre_actividad']}")
-            
             st.session_state['activity_restored'] = True
         except Exception as e:
             st.warning(f"No se pudo restaurar actividad: {e}")
             st.session_state['activity_restored'] = True
 
 def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, subactivity=None, comment=None):
-    """
-    Lógica central para detener la actividad anterior e iniciar la nueva.
-    """
     now = datetime.now()
-
-    # 1. Detener actividad actual (si existe)
     if st.session_state.get('current_registro_id'):
         try:
             queries.stop_activity(conn, st.session_state['current_registro_id'], now)
         except Exception as e:
             st.session_state['last_error'] = f"Error al detener actividad: {str(e)}"
             return
-
-    # 2. Manejar "Salida" (es un evento final)
     if new_activity_name == 'Salida':
         try:
             reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity, comment)
             queries.stop_activity(conn, reg_id, now)
-            
             st.session_state['current_activity_id'] = None
             st.session_state['current_activity_name'] = "Jornada Finalizada"
             st.session_state['current_start_time'] = None
@@ -117,19 +97,15 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, sub
         except Exception as e:
             st.session_state['last_error'] = f"Error al marcar salida: {str(e)}"
             return
-    
-    # 3. Iniciar nueva actividad (si no es "Salida")
     else:
         try:
             new_reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity, comment)
-            
             st.session_state['current_activity_id'] = new_activity_id
             st.session_state['current_activity_name'] = new_activity_name
             st.session_state['current_start_time'] = now
             st.session_state['current_registro_id'] = new_reg_id
             st.session_state['current_subactivity'] = subactivity
             st.session_state['current_comment'] = comment
-            
             subact_text = f" - {subactivity}" if subactivity else ""
             st.session_state['last_success'] = f"✅ Actividad iniciada: {new_activity_name}{subact_text}"
             st.session_state.pop('last_error', None)
@@ -137,18 +113,19 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, sub
         except Exception as e:
             st.session_state['last_error'] = f"Error al iniciar actividad: {str(e)}"
             return
-
     st.cache_data.clear()
 
 def get_activity_color(activity_name):
-    """Retorna color suave según el tipo de actividad"""
     colors = {
+        'Ingreso': '#E0E0E0',
         'Seguimiento': '#C8E6C9',
         'Bandeja de correo': '#BBDEFB',
         'Reportes': '#FFE0B2',
-        'Pausa': '#B2EBF2',
+        'Break Salida': '#B2EBF2',
+        'Regreso Break': '#B2EBF2',
         'Auxiliares': '#F8BBD0',
         'Reunión': '#E1BEE7',
+        'Incidencia': '#FFCDD2',
         'Salida': '#CFD8DC'
     }
     return colors.get(activity_name, '#F5F5F5')
@@ -220,8 +197,11 @@ def show_asesor_dashboard(conn):
     user = st.session_state['user_info']
     user_id = user['id']
     
+    # Definir la fecha "de hoy" (según el servidor de Streamlit)
+    today_date = datetime.now().date()
+
     # Restaurar actividad abierta al cargar
-    restore_open_activity(conn, user_id)
+    restore_open_activity(conn, user_id, today_date)
     
     # Verificar y cerrar día si cambió
     check_and_close_day(conn, user_id)
@@ -421,7 +401,7 @@ def show_asesor_dashboard(conn):
             
             col1, col2, col3 = st.columns([1, 1, 2])
             
-            if col1.button("✅ Confirmar", type="primary", use_container_width=True):
+            if col1.button("✅ Confirmar", type="primary", width='stretch'):
                 handle_activity_click(
                     conn, 
                     user['id'], 
@@ -432,7 +412,7 @@ def show_asesor_dashboard(conn):
                 )
                 st.rerun()
             
-            if col2.button("❌ Cancelar", use_container_width=True):
+            if col2.button("❌ Cancelar", width='stretch'):
                 st.session_state.pop('show_subactivity_modal')
                 st.session_state.pop('pending_activity')
                 st.rerun()
@@ -452,13 +432,18 @@ def show_asesor_dashboard(conn):
     
     cols = st.columns(4)
     
+    # Verificar si necesita modal de detalles
+    activities_with_details = ['Seguimiento', 'Bandeja de correo', 'Reportes', 'Auxiliares']
+
     for index, row in activities_df.iterrows():
         col = cols[index % 4]
         activity_id = row['id']
         activity_name = row['nombre_actividad']
         
-        disabled = (activity_id == st.session_state.get('current_activity_id') or 
-                    st.session_state.get('current_activity_name') == "Jornada Finalizada")
+        disabled = bool(
+            (activity_id == st.session_state.get('current_activity_id')) or 
+            (st.session_state.get('current_activity_name') == "Jornada Finalizada")
+        )
         
         emoji_map = {
             'Seguimiento': '📞',
@@ -473,14 +458,12 @@ def show_asesor_dashboard(conn):
         
         if col.button(f"{emoji} {activity_name}", 
                      key=f"btn_{activity_id}", 
-                     use_container_width=True, 
+                     width='stretch', 
                      disabled=disabled,
                      type="primary"):
             
-            # Verificar si necesita modal de detalles
-            needs_details = activity_name in ['Seguimiento', 'Bandeja de correo', 'Reportes', 'Auxiliares']
-            
-            if needs_details:
+ 
+            if activity_name in activities_with_details:
                 st.session_state['show_subactivity_modal'] = True
                 st.session_state['pending_activity'] = {
                     'id': activity_id,
@@ -495,7 +478,8 @@ def show_asesor_dashboard(conn):
     st.markdown('<div class="section-title">📊 Resumen del día</div>', unsafe_allow_html=True)
     
     try:
-        summary_df = queries.get_today_summary(conn, user_id)
+        # Pasa 'today_date' como argumento
+        summary_df = queries.get_today_summary(conn, user_id, today_date)
         
         if not summary_df.empty:
             # Calcular totales
@@ -530,7 +514,7 @@ def show_asesor_dashboard(conn):
             
             st.dataframe(
                 display_df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Actividad": st.column_config.TextColumn("Actividad", width="medium"),
@@ -551,7 +535,7 @@ def show_asesor_dashboard(conn):
             st.bar_chart(
                 chart_df,
                 height=280,
-                use_container_width=True,
+                width='stretch',
                 color='#4A90E2'
             )
             
@@ -562,9 +546,9 @@ def show_asesor_dashboard(conn):
 
     # Línea de tiempo (Histórico detallado)
     st.markdown('<div class="section-title">🕐 Histórico de Actividades</div>', unsafe_allow_html=True)
-    
     try:
-        log_df = queries.get_today_log(conn, user_id)
+        # Pasa 'today_date' como argumento
+        log_df = queries.get_today_log(conn, user_id, today_date) # (Usando la corrección anterior)
         
         if not log_df.empty:
             # Tabla detallada con toda la información
@@ -579,7 +563,7 @@ def show_asesor_dashboard(conn):
             
             st.dataframe(
                 display_log,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Actividad": st.column_config.TextColumn("📋 Actividad", width="medium"),
@@ -626,7 +610,11 @@ def show_asesor_dashboard(conn):
                 if comment and comment != '-':
                     # Truncar comentario si es muy largo
                     display_comment = comment if len(comment) <= 80 else comment[:77] + "..."
-                    timeline_html += f'<div class="timeline-comment">{display_comment}</div>'
+                    # --- INICIA CORRECCIÓN ---
+                    # Escapar el comentario para evitar inyección de HTML
+                    safe_comment = escape(display_comment)
+                    timeline_html += f'<div class="timeline-comment">{safe_comment}</div>'
+                    # --- FIN CORRECCIÓN ---
                 
                 timeline_html += f"""
                     </div>
