@@ -103,7 +103,7 @@ def get_open_activity(conn, user_id, date):
         LEFT JOIN subactividades s ON r.subactividad_id = s.id
         WHERE r.usuario_id = :user_id 
         AND r.hora_fin IS NULL
-        AND r.fecha = CURRENT_DATE
+        AND r.fecha = :date
         ORDER BY r.hora_inicio DESC
         LIMIT 1
         """,
@@ -125,7 +125,7 @@ def start_activity(conn, user_id, actividad_id, hora_inicio, subactividad_id=Non
                 text("""
                     INSERT INTO public.registro_actividades 
                     (usuario_id, actividad_id, fecha, hora_inicio, subactividad_id, observaciones, estado) -- CAMBIO AQUÍ
-                    VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, :subactividad_id, :comentario, 'Iniciado')
+                    VALUES (:user_id, :actividad_id, :date, :hora_inicio, :subactividad_id, :comentario, 'Iniciado')
                     RETURNING id
                 """),
                 {
@@ -218,7 +218,7 @@ def get_today_summary(conn, user_id, date):
         FROM registro_actividades r 
         JOIN actividades a ON r.actividad_id = a.id 
         WHERE r.usuario_id = :user_id 
-          AND r.fecha = CURRENT_DATE
+          AND r.fecha = :date
         GROUP BY a.nombre_actividad
         ORDER BY total_segundos DESC
         """,
@@ -251,7 +251,7 @@ def get_today_log(conn, user_id, date):
         JOIN actividades a ON r.actividad_id = a.id 
         LEFT JOIN subactividades s ON r.subactividad_id = s.id
         WHERE r.usuario_id = :user_id 
-          AND r.fecha = CURRENT_DATE
+          AND r.fecha = :date
         ORDER BY r.hora_inicio DESC
         """,
         params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
@@ -366,7 +366,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
             WHERE fecha = :fecha
               AND actividad_id NOT IN (
                   SELECT id FROM actividades 
-                  WHERE nombre_actividad IN ('Pausa', 'Break')
+                  WHERE nombre_actividad IN ('Break Salida', 'Regreso Break')
               )
             GROUP BY usuario_id
         )
