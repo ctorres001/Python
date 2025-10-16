@@ -578,7 +578,7 @@ def show_asesor_dashboard(conn):
             
             # Timeline visual (opcional, más visual)
             st.markdown("**Línea de Tiempo Visual**")
-            
+
             for _, row in log_df.iterrows():
                 activity_name = row.get('nombre_actividad', 'N/A')
                 subactivity = row.get('subactividad', '')
@@ -598,24 +598,27 @@ def show_asesor_dashboard(conn):
                 }
                 emoji = emoji_map.get(activity_name, '📌')
                 
+                # Formatear la hora de inicio correctamente
+                if isinstance(inicio, datetime):
+                    inicio_str = inicio.strftime("%H:%M:%S")
+                else:
+                    inicio_str = str(inicio) if inicio else "N/A"
+                
                 timeline_html = f"""
                 <div class="timeline-item" style="background-color: {color};">
                     <div style="flex: 1;">
-                        <div class="timeline-activity">{emoji} {activity_name} <span style="color: #6B7280; font-size: 0.85rem;">• {inicio}</span></div>
+                        <div class="timeline-activity">{emoji} {activity_name} <span style="color: #6B7280; font-size: 0.85rem;">• {inicio_str}</span></div>
                 """
                 
                 if subactivity and subactivity != '-':
                     timeline_html += f'<div class="timeline-subactivity">→ {subactivity}</div>'
                 
                 if comment and comment != '-':
-                    # Truncar comentario si es muy largo
                     display_comment = comment if len(comment) <= 80 else comment[:77] + "..."
-                    # --- INICIA CORRECCIÓN ---
-                    # Escapar el comentario para evitar inyección de HTML
                     safe_comment = escape(display_comment)
                     timeline_html += f'<div class="timeline-comment">{safe_comment}</div>'
-                    # --- FIN CORRECCIÓN ---
                 
+                # ✅ CORRECCIÓN: Cerrar el div antes de la duración
                 timeline_html += f"""
                     </div>
                     <div class="timeline-time">{duration}</div>
