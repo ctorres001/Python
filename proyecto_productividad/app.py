@@ -17,13 +17,23 @@ st.set_page_config(
 # Agregar esto:
 hide_streamlit_style = """
     <style>
+        /* Ocultar menú principal, footer y encabezado */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
+
+        /* Ocultar botones de acción genéricos */
         .stActionButton {visibility: hidden;}
-        .st-emotion-cache-1avcm0n {display: none;}  /* GitHub link */
+
+        /* Ocultar enlace a GitHub si aparece */
+        .st-emotion-cache-1avcm0n {display: none;}
+
+        /* Ocultar botón "Manage app" */
+        [data-testid="manage-app-button"] {
+            display: none !important;
+        }
     </style>
-    """
+"""
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ==============================
