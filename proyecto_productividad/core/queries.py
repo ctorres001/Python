@@ -125,7 +125,7 @@ def start_activity(conn, user_id, actividad_id, hora_inicio, subactividad_id=Non
                 text("""
                     INSERT INTO public.registro_actividades 
                     (usuario_id, actividad_id, fecha, hora_inicio, subactividad_id, observaciones, estado) -- CAMBIO AQUÍ
-                    VALUES (:user_id, :actividad_id, :date, :hora_inicio, :subactividad_id, :comentario, 'Iniciado')
+                    VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, :subactividad_id, :comentario, 'Iniciado')
                     RETURNING id
                 """),
                 {
