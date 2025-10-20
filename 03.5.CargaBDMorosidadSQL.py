@@ -6,15 +6,15 @@ import numpy as np
 # ======================
 # Parámetros
 # ======================
-excel_path = r"D:\FNB\Reportes\06 Reporte de Morosidad\01. Archivos Cartera\2025-07.xlsx"
+excel_path = r"D:\FNB\Reportes\06 Reporte de Morosidad\01. Archivos Cartera\2025-09.xlsx"
 sheet_name = "BASE"
-csv_path = r"D:\FNB\Reportes\06 Reporte de Morosidad\01. Archivos Cartera\Reporte_Cartera.csv"
+csv_path = r"D:\FNB\Reportes\06 Reporte de Morosidad\Reporte_Cartera.csv"
 
 server = "192.168.64.250"
 database = "BD_CALIDDA_FNB"
 username = "ctorres"
 password = "ibr2025"
-table_name = "BD_Morosidad_202507"
+table_name = "BD_Morosidad_202509"
 
 # Mapeo esperado SQL
 column_types_sql = {

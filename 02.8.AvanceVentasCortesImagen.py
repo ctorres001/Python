@@ -150,7 +150,7 @@ class WhatsAppSender:
 # ============================================================
 class SalesImageGenerator:
     def __init__(self):
-        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\00. Estructura Reporte\Canal\Canal.xlsx"
+        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal\Canal.xlsx"
         self.ruta_imagenes = r"D:\FNB\Reportes\19. Reportes IBR\06. Avance de ventas cortes\Imagenes"
         self.columnas_producto = [
             "PRODUCTO", "SKU", "CANTIDAD", "PRECIO", "CATEGORIA", "MARCA", "SUBCANAL",

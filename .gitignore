@@ -36,6 +36,10 @@ Node/
 !proyecto_productividad/**/*.py
 !proyecto_productividad/**/*.txt
 !proyecto_productividad/**/*.png
+!Otros/
+!Otros/**/
+!Otros/**/*.py
+Proyectos.code-workspace
 
 # ❌ Excluir específicamente pruebas.py y similares
 pru*.py

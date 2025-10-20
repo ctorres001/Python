@@ -29,7 +29,7 @@ class SalesDataProcessor:
             "CATEGORIA REAL", "TIPO PRODUCTO", "MODELO PRODUCTO", "SKU2", "DESCRIPCION"
         ]
         self.columnas_numericas = ["IMPORTE (S./)", "CRÉDITO UTILIZADO", "Nro. DE CUOTAS", "CANTIDAD", "PRECIO"]
-        self.ruta_canal_fija = r"D:\\FNB\\Reportes\\19. Reportes IBR\\00. Estructura Reporte\\Canal\\Canal.xlsx"
+        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal\Canal.xlsx"
         self.ruta_base = r"D:\\FNB\\Reportes\\19. Reportes IBR\\00. Estructura Reporte\\Base\\Base_Origen.xlsx"
         self.ruta_salida = r"D:\\FNB\\Reportes\\19. Reportes IBR\\00. Estructura Reporte\\Procesado"
         self.rangos_hora = [f"{h:02d}:{m:02d} - {(h + (m + 30) // 60) % 24:02d}:{(m + 30) % 60:02d}"
@@ -38,7 +38,7 @@ class SalesDataProcessor:
         self.columnas_grupo1 = []
         self.columnas_grupo2 = []
         self.max_productos = 4
-        self.ruta_feriados = r"D:\FNB\Reportes\19. Reportes IBR\01. Pendientes de Entrega\Feriados"
+        self.ruta_feriados = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Feriados"
 
     def _seleccionar_archivo(self, titulo: str) -> str:
         # Verificar si existe el archivo en la ruta predeterminada

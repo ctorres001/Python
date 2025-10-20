@@ -14,12 +14,15 @@ class SistemaReportesAutomaticos:
         self.carpeta_base = r"D:\FNB\Reportes\19. Reportes IBR\01. Pendientes de Entrega"
         self.carpeta_base_datos = os.path.join(self.carpeta_base, "Base")
         self.carpeta_archivos = os.path.join(self.carpeta_base, "Archivos")
-        self.carpeta_canal = os.path.join(self.carpeta_base, "Canal")
-        self.carpeta_feriados = os.path.join(self.carpeta_base, "Feriados")
         self.carpeta_faltantes = os.path.join(self.carpeta_base, "Canal Faltante")
         self.carpeta_imagenes = os.path.join(self.carpeta_archivos, "tablas_img")
-        self.carpeta_resumen = os.path.join(self.carpeta_base, "Resumen")  # NUEVA CARPETA RESUMEN
-        self.firma_path = os.path.join(self.carpeta_base, 'Firma', 'Firma_resized.jpg')
+        self.carpeta_resumen = os.path.join(self.carpeta_base, "Resumen")
+        
+        # RUTAS A ARCHIVOS COMUNES
+        self.carpeta_canal = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal"
+        self.carpeta_feriados = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Feriados"
+        self.firma_path = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Firma\Firma_resized.jpg"
+        
         # CAMBIO DE RUTA PARA DESTINATARIOS
         self.destinatarios_path = os.path.join(self.carpeta_base, 'Destinatarios')
 
@@ -27,7 +30,7 @@ class SistemaReportesAutomaticos:
         os.makedirs(self.carpeta_archivos, exist_ok=True)
         os.makedirs(self.carpeta_imagenes, exist_ok=True)
         os.makedirs(self.carpeta_faltantes, exist_ok=True)
-        os.makedirs(self.carpeta_resumen, exist_ok=True)  # CREAR CARPETA RESUMEN
+        os.makedirs(self.carpeta_resumen, exist_ok=True)
 
     def buscar_excel_en_carpeta(self, carpeta):
         """Busca el primer archivo Excel en una carpeta"""

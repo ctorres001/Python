@@ -15,11 +15,13 @@ class SistemaReportesPorCanal:
         self.carpeta_base = r"D:\FNB\Reportes\19. Reportes IBR\01. Pendientes de Entrega"
         self.carpeta_base_datos = os.path.join(self.carpeta_base, "Base")
         self.carpeta_archivos = os.path.join(self.carpeta_base, "Archivos Canal")
-        self.carpeta_feriados = os.path.join(self.carpeta_base, "Feriados")
-        self.carpeta_canal = os.path.join(self.carpeta_base, "Canal")
         self.carpeta_imagenes = os.path.join(self.carpeta_archivos, "tablas_img")
         self.destinatarios_path = os.path.join(self.carpeta_base, 'Destinatarios')
-        self.firma_path = os.path.join(self.carpeta_base, 'Firma', 'Firma_resized.jpg')
+          
+        # RUTAS A ARCHIVOS COMUNES
+        self.carpeta_feriados = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Feriados"
+        self.carpeta_canal = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal"
+        self.firma_path = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Firma\Firma_resized.jpg"
 
         # Crear carpetas necesarias
         os.makedirs(self.carpeta_archivos, exist_ok=True)

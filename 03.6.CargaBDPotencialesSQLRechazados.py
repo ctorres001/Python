@@ -6,18 +6,17 @@ import pyodbc
 from sqlalchemy import create_engine, text
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, text
 import warnings
 
 # Suprimir warnings específicos
 warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 
 # ======================
-# CONFIGURACIÓN GLOBAL
+# CONFIGURACIÓN GLOBAL - RECHAZADOS
 # ======================
 
-# Archivos por defecto
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\09. Setiembre\BD14092025\BD14092025.txt"
+# Archivo por defecto para RECHAZADOS
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\09. Setiembre\BD14092025\BD14092025_Rechazados.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
@@ -27,80 +26,24 @@ SQL_CONFIG = {
     "password": "ibr2025"
 }
 
-# Mapeo de tipos de datos SQL Server (ACTUALIZADO)
+# Mapeo de tipos de datos SQL Server - RECHAZADOS
 COLUMN_TYPES_SQL = {
     "Fecha_Eval": "DATETIME",
     "Tipo_Docum": "VARCHAR(500)",
-    "N_I_F_1": "VARCHAR(20)",  # CORREGIDO: Ahora es texto para soportar letras
+    "N_I_F_1": "VARCHAR(20)",
     "Int_cial": "BIGINT",
     "Nombre": "VARCHAR(500)",
-    "Saldo_Cred": "DECIMAL(18,2)",  # CORREGIDO: 2 decimales
-    "LC_Mod": "VARCHAR(500)",
-    "Cta_Contr": "BIGINT",
-    "Distrito": "VARCHAR(500)",
-    "Direccion": "VARCHAR(500)",
-    "NSE_1": "INT",
-    "Fecha_Alta": "DATETIME",
-    "Cta_Ctto_2": "BIGINT",
-    "Distrito_2": "VARCHAR(500)",
-    "Direccion_2": "VARCHAR(500)",
-    "NSE_2": "INT",
-    "FechaAlta2": "DATETIME",
-    "Cta_Ctto_3": "BIGINT",
-    "Distrito_3": "VARCHAR(500)",
-    "Direccion_3": "VARCHAR(500)",
-    "NSE_3": "INT",
-    "FechaAlta3": "DATETIME",
-    "Cta_Ctto_4": "BIGINT",
-    "Distrito_4": "VARCHAR(500)",
-    "Direccion_4": "VARCHAR(500)",
-    "NSE_4": "INT",
-    "FechaAlta4": "DATETIME",
-    "Cta_Ctto_5": "BIGINT",
-    "Distrito_5": "VARCHAR(500)",
-    "Direccion_5": "VARCHAR(500)",
-    "NSE_5": "INT",
-    "FechaAlta5": "DATETIME",
-    "CaCta": "VARCHAR(500)",
-    "Texto_categ_cuenta": "VARCHAR(500)"
+    "Mensaje": "VARCHAR(500)"
 }
 
-# Mapeo de nombres originales a nombres SQL-compatibles (ACTUALIZADO)
+# Mapeo de nombres originales a nombres SQL-compatibles - RECHAZADOS
 MAPEO_NOMBRES_COLUMNAS = {
     "Fecha Eval": "Fecha_Eval",
     "Tipo Docum": "Tipo_Docum", 
     "N.I.F.1": "N_I_F_1",
     "Int.cial.": "Int_cial",
     "Nombre": "Nombre",
-    "Saldo Créd": "Saldo_Cred",
-    "LC Mod": "LC_Mod",
-    "Cta.Contr.": "Cta_Contr",
-    "Distrito": "Distrito",
-    "Dirección": "Direccion",
-    "NSE 1": "NSE_1",
-    "Fecha Alta": "Fecha_Alta",
-    "Cta.Ctto 2": "Cta_Ctto_2",
-    "Distrito 2": "Distrito_2",
-    "Dirección 2": "Direccion_2",
-    "NSE 2": "NSE_2",
-    "FechaAlta2": "FechaAlta2",
-    "Cta.Ctto 3": "Cta_Ctto_3",
-    "Distrito 3": "Distrito_3",
-    "Dirección 3": "Direccion_3",
-    "NSE 3": "NSE_3",
-    "FechaAlta3": "FechaAlta3",
-    "Cta.Ctto 4": "Cta_Ctto_4",
-    "Distrito 4": "Distrito_4",
-    "Dirección 4": "Direccion_4",  # CORREGIDO
-    "NSE 4": "NSE_4",
-    "FechaAlta4": "FechaAlta4",
-    "Cta.Ctto 5": "Cta_Ctto_5",
-    "Distrito 5": "Distrito_5",
-    "Dirección 5": "Direccion_5",  # CORREGIDO
-    "NSE 5": "NSE_5",
-    "FechaAlta5": "FechaAlta5",
-    "CaCta": "CaCta",
-    "Texto categ.cuenta": "Texto_categ_cuenta"
+    "Mensaje": "Mensaje"
 }
 
 # ======================
@@ -126,13 +69,13 @@ def detectar_separador(linea_cabecera):
     """Detecta el separador utilizado en el archivo"""
     separadores = ['\t', ';', ',', '|']
     for sep in separadores:
-        if linea_cabecera.count(sep) > 10:
+        if linea_cabecera.count(sep) > 5:  # Reducido para archivos con pocas columnas
             return sep
     return '\t'
 
 def analizar_archivo_txt(archivo_entrada):
     """Analiza la estructura del archivo antes de la limpieza"""
-    print("=== ANÁLISIS DEL ARCHIVO TXT ===")
+    print("=== ANÁLISIS DEL ARCHIVO TXT RECHAZADOS ===")
     
     codificacion = detectar_codificacion(archivo_entrada)
     
@@ -145,6 +88,7 @@ def analizar_archivo_txt(archivo_entrada):
         separador = detectar_separador(lineas[8])
         cabecera = lineas[8].strip().split(separador)
         print(f"Cabecera detectada: {len(cabecera)} columnas")
+        print(f"Columnas: {', '.join(cabecera[:6])}")
         
         problemas = []
         for i, linea in enumerate(lineas[10:], start=11):
@@ -162,8 +106,8 @@ def analizar_archivo_txt(archivo_entrada):
     print("=" * 50)
 
 def limpiar_archivo_txt(archivo_entrada):
-    """Limpia un archivo TXT con problemas de estructura y retorna DataFrame"""
-    print("=== INICIANDO LIMPIEZA DE ARCHIVO TXT ===")
+    """Limpia un archivo TXT de rechazados y retorna DataFrame"""
+    print("=== INICIANDO LIMPIEZA DE ARCHIVO TXT RECHAZADOS ===")
     
     codificacion = detectar_codificacion(archivo_entrada)
     
@@ -189,11 +133,11 @@ def limpiar_archivo_txt(archivo_entrada):
     
     num_columnas_esperadas = len(cabecera)
     print(f"Cabecera extraída: {num_columnas_esperadas} columnas")
+    print(f"Columnas detectadas: {', '.join(cabecera)}")
     
-    # Procesar datos desde fila 11
+    # Procesar datos desde fila 11 (índice 10)
     datos_raw = lineas[10:]
     datos_limpios = []
-    filas_corregidas = 0
     filas_omitidas = 0
     
     for i, linea in enumerate(datos_raw, start=11):
@@ -202,42 +146,13 @@ def limpiar_archivo_txt(archivo_entrada):
             
         campos = linea.strip().split(separador)
         
-        if len(campos) == num_columnas_esperadas + 1:
-            # Manejar problema de columna extra
-            cta_contr_index = None
-            direccion_index = None
-            
-            for j, col in enumerate(cabecera):
-                if 'Cta.Contr' in col:
-                    cta_contr_index = j
-                elif 'Dirección' in col and direccion_index is None:
-                    direccion_index = j
-            
-            if cta_contr_index is not None and len(campos) > cta_contr_index:
-                cuenta = campos[cta_contr_index]
-                
-                if cuenta in ['5199463', '5320440']:
-                    if direccion_index is not None and direccion_index < len(campos) - 1:
-                        direccion_completa = str(campos[direccion_index]) + ' ' + str(campos[direccion_index + 1])
-                        campos_corregidos = campos[:direccion_index] + [direccion_completa] + campos[direccion_index + 2:]
-                        
-                        if len(campos_corregidos) == num_columnas_esperadas:
-                            datos_limpios.append(campos_corregidos)
-                            filas_corregidas += 1
-                            continue
-            
-            datos_limpios.append(campos[:num_columnas_esperadas])
-            filas_corregidas += 1
-            
-        elif len(campos) == num_columnas_esperadas:
+        if len(campos) == num_columnas_esperadas:
             datos_limpios.append(campos)
         else:
             filas_omitidas += 1
     
-    if filas_corregidas > 0:
-        print(f"Filas corregidas: {filas_corregidas}")
     if filas_omitidas > 0:
-        print(f"Filas omitidas: {filas_omitidas}")
+        print(f"Filas omitidas por estructura incorrecta: {filas_omitidas}")
     print(f"Total de filas procesadas: {len(datos_limpios)}")
     
     if len(datos_limpios) == 0:
@@ -264,21 +179,10 @@ def limpiar_archivo_txt(archivo_entrada):
     df = df[columnas_existentes]
     print(f"✅ Columnas seleccionadas (mapeadas): {', '.join(columnas_existentes)}")
     
-    # Reemplazar "LA ALBORADA" por "COMAS"
-    columnas_distrito = [col for col in df.columns if 'Distrito' in col]
-    total_cambios = 0
-    for col in columnas_distrito:
-        if col in df.columns:
-            cambios = df[col].str.contains('LA ALBORADA', na=False).sum()
-            if cambios > 0:
-                df[col] = df[col].str.replace('LA ALBORADA', 'COMAS', regex=False)
-                total_cambios += cambios
-    
-    if total_cambios > 0:
-        print(f"Distritos actualizados: {total_cambios} registros 'LA ALBORADA' → 'COMAS'")
-    
     # Limpieza general
     df = aplicar_limpieza_general(df)
+    
+    print(f"✅ DataFrame creado: {len(df)} filas x {len(df.columns)} columnas")
     
     return df
 
@@ -326,7 +230,7 @@ def convertir_tipos_datos_basicos(df):
 # ======================
 
 def generar_nombre_tabla(archivo_path):
-    """Genera nombre de tabla basado en el archivo"""
+    """Genera nombre de tabla basado en el archivo - RECHAZADOS"""
     nombre_archivo = os.path.basename(archivo_path)
     if "BD" in nombre_archivo and any(c.isdigit() for c in nombre_archivo):
         fecha_match = re.search(r'(\d{8})', nombre_archivo)
@@ -337,10 +241,10 @@ def generar_nombre_tabla(archivo_path):
             mes = fecha[2:4]
             anio = fecha[4:8]
             fecha_sql = f"{anio}{mes}{dia}"
-            return f"BD_Potenciales_{fecha_sql}"
+            return f"BD_Potenciales_Rechazado_{fecha_sql}"
     
     timestamp = datetime.now().strftime("%Y%m%d")
-    return f"BD_Potenciales_{timestamp}"
+    return f"BD_Potenciales_Rechazado_{timestamp}"
 
 def limpiar_nombres_columnas_sql(df):
     """Limpia nombres de columnas para SQL Server"""
@@ -357,8 +261,7 @@ def limpiar_nombres_columnas_sql(df):
             nuevo_nombre = MAPEO_NOMBRES_COLUMNAS[col_con_espacios]
         else:
             # SEGUNDO: Verificar mapeo sin espacios extra (normalizar)
-            # Esto maneja casos como "Dirección4" vs "Dirección 4"
-            col_normalizado = ' '.join(col.split())  # Normaliza espacios múltiples
+            col_normalizado = ' '.join(col.split())
             
             if col_normalizado in MAPEO_NOMBRES_COLUMNAS:
                 nuevo_nombre = MAPEO_NOMBRES_COLUMNAS[col_normalizado]
@@ -377,22 +280,20 @@ def limpiar_nombres_columnas_sql(df):
     
     if cambios:
         print(f"Columnas renombradas: {len(cambios)}")
-        # Mostrar cambios importantes
-        for orig, nuevo in cambios[:5]:
+        for orig, nuevo in cambios:
             print(f"  {orig} → {nuevo}")
-        if len(cambios) > 5:
-            print(f"  ... y {len(cambios) - 5} más")
     
     df.columns = nuevos_nombres
     return df
 
 def convertir_tipos_datos_sql(df):
-    """Convierte tipos de datos según mapeo SQL"""
+    """Convierte tipos de datos según mapeo SQL - RECHAZADOS"""
     print("\n=== Conversión de tipos para SQL Server ===")
     
     for col in df.columns:
-        # IGNORAR COLUMNAS NO MAPEADAS (como "Item")
+        # IGNORAR COLUMNAS NO MAPEADAS
         if col not in COLUMN_TYPES_SQL:
+            print(f"⚠️  Columna '{col}' no está en el mapeo - se mantendrá como está")
             continue
             
         sql_type = COLUMN_TYPES_SQL[col]
@@ -400,16 +301,18 @@ def convertir_tipos_datos_sql(df):
         try:
             if sql_type.startswith("VARCHAR"):
                 df[col] = df[col].astype(str)
+                # Aplicar trim (strip) para eliminar espacios
+                df[col] = df[col].str.strip()
+                # Limpiar valores nulos
                 df[col] = df[col].replace(['nan', 'NaN', 'None', 'null'], pd.NA)
                 
             elif sql_type in ("INT", "BIGINT"):
-                # CORREGIDO: Manejar valores decimales en columnas INT/BIGINT
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-                # Redondear valores decimales antes de convertir a Int64
                 df[col] = df[col].round(0).astype("Int64")
                 
             elif "DECIMAL" in sql_type:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+                df[col] = df[col].round(2)
                 
             elif sql_type == "DATETIME":
                 df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
@@ -603,13 +506,14 @@ def mostrar_resumen_proceso(df, archivo_original, csv_generado=None):
         return
     
     print("\n" + "=" * 60)
-    print("                RESUMEN DEL PROCESO")
+    print("          RESUMEN DEL PROCESO - RECHAZADOS")
     print("=" * 60)
     print(f"📁 Archivo original: {os.path.basename(archivo_original)}")
     if csv_generado:
         print(f"📄 CSV generado: {os.path.basename(csv_generado)}")
-    print(f"📊 Registros procesados: {len(df):,}")
-    print(f"📋 Columnas finales: {len(df.columns)}")
+    print(f"📊 Registros rechazados: {len(df):,}")
+    print(f"📋 Columnas: {len(df.columns)}")
+    print(f"   {', '.join(df.columns.tolist())}")
     print("=" * 60)
 
 # ======================
@@ -618,7 +522,7 @@ def mostrar_resumen_proceso(df, archivo_original, csv_generado=None):
 
 def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, csv_path=None):
     """Proceso completo: TXT → Limpieza → CSV → SQL Server"""
-    print("🚀 INICIANDO PROCESO ETL COMPLETO OPTIMIZADO")
+    print("🚀 INICIANDO PROCESO ETL - RECHAZADOS")
     print("=" * 60)
     print(f"📁 Archivo de entrada: {archivo_txt}")
     
@@ -658,7 +562,7 @@ def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, cs
         # 4. CARGAR A SQL SERVER
         if cargar_sql:
             print("\n" + "=" * 30)
-            print("FASE 3: CARGA OPTIMIZADA A SQL SERVER")
+            print("FASE 3: CARGA A SQL SERVER")
             print("=" * 30)
             
             df_sql = df_limpio.copy()
@@ -676,7 +580,7 @@ def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, cs
         # 5. MOSTRAR RESUMEN
         mostrar_resumen_proceso(df_limpio, archivo_txt, csv_generado)
         
-        print(f"\n🎉 PROCESO ETL OPTIMIZADO COMPLETADO!")
+        print(f"\n🎉 PROCESO ETL RECHAZADOS COMPLETADO!")
         
         return df_limpio
         
@@ -687,9 +591,9 @@ def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, cs
         return None
 
 def main():
-    """Función principal simplificada - Solo opción 1"""
+    """Función principal - Proceso automático de rechazados"""
     print("=" * 80)
-    print("       SISTEMA ETL OPTIMIZADO - CLIENTES POTENCIALES CALIDDA")
+    print("     SISTEMA ETL - CLIENTES POTENCIALES RECHAZADOS - CALIDDA")
     print("=" * 80)
     
     # Usar directamente el archivo por defecto sin preguntar
@@ -703,7 +607,7 @@ def main():
     )
     
     if resultado is not None:
-        print("\n✅ Proceso completo OPTIMIZADO finalizado exitosamente")
+        print("\n✅ Proceso de RECHAZADOS finalizado exitosamente")
     else:
         print("\n❌ El proceso falló")
 
