@@ -146,6 +146,7 @@ def limpiar_archivo_txt(archivo_entrada):
     # Procesar datos desde fila 11 (índice 10)
     datos_raw = lineas[10:]
     datos_limpios = []
+    filas_corregidas = 0
     filas_omitidas = 0
     
     for i, linea in enumerate(datos_raw, start=11):
@@ -154,13 +155,44 @@ def limpiar_archivo_txt(archivo_entrada):
             
         campos = linea.strip().split(separador)
         
-        if len(campos) == num_columnas_esperadas:
+        if len(campos) == num_columnas_esperadas + 1:
+            # Manejar problema de columna extra
+            cta_contr_index = None
+            direccion_index = None
+            
+            for j, col in enumerate(cabecera):
+                if 'Cta.Contr' in col or 'Cta Contr' in col:
+                    cta_contr_index = j
+                elif 'Dirección' in col or 'Direccion' in col:
+                    if direccion_index is None:
+                        direccion_index = j
+            
+            if cta_contr_index is not None and len(campos) > cta_contr_index:
+                cuenta = campos[cta_contr_index]
+                
+                # Intentar corregir uniendo campos de dirección
+                if direccion_index is not None and direccion_index < len(campos) - 1:
+                    direccion_completa = str(campos[direccion_index]) + ' ' + str(campos[direccion_index + 1])
+                    campos_corregidos = campos[:direccion_index] + [direccion_completa] + campos[direccion_index + 2:]
+                    
+                    if len(campos_corregidos) == num_columnas_esperadas:
+                        datos_limpios.append(campos_corregidos)
+                        filas_corregidas += 1
+                        continue
+            
+            # Si no se pudo corregir, eliminar la última columna
+            datos_limpios.append(campos[:num_columnas_esperadas])
+            filas_corregidas += 1
+            
+        elif len(campos) == num_columnas_esperadas:
             datos_limpios.append(campos)
         else:
             filas_omitidas += 1
     
+    if filas_corregidas > 0:
+        print(f"Filas corregidas: {filas_corregidas}")
     if filas_omitidas > 0:
-        print(f"Filas omitidas por estructura incorrecta: {filas_omitidas}")
+        print(f"Filas omitidas: {filas_omitidas}")
     print(f"Total de filas procesadas: {len(datos_limpios)}")
     
     if len(datos_limpios) == 0:
