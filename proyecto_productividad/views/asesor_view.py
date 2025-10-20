@@ -1,3 +1,4 @@
+# asesor_view.py (versión corregida)
 import streamlit as st
 from core import queries
 from datetime import datetime, time as dt_time
@@ -61,10 +62,12 @@ def restore_open_activity(conn, user_id, date):
             open_activity = queries.get_open_activity(conn, user_id, date)
             if open_activity is not None and not open_activity.empty:
                 row = open_activity.iloc[0]
+                # Restauramos valores útiles a session_state
                 st.session_state['current_registro_id'] = row['id']
                 st.session_state['current_activity_id'] = row['actividad_id']
                 st.session_state['current_activity_name'] = row['nombre_actividad']
                 st.session_state['current_start_time'] = row['hora_inicio']
+                # row['subactividad'] viene de la query como nombre (si existe)
                 st.session_state['current_subactivity'] = row.get('subactividad', None)
                 st.session_state['current_comment'] = row.get('comentario', None)
                 st.success(f"🔄 Actividad restaurada: {row['nombre_actividad']}")
@@ -73,17 +76,25 @@ def restore_open_activity(conn, user_id, date):
             st.warning(f"No se pudo restaurar actividad: {e}")
             st.session_state['activity_restored'] = True
 
-def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, subactivity=None, comment=None):
+def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, subactivity_id=None, comment=None, subactivity_name=None):
+    """
+    Inicia o cambia actividad. 
+    subactivity_id -> ID que va a la BD
+    subactivity_name -> nombre para mostrar en UI (opcional)
+    """
     now = datetime.now()
+    # Si existe actividad en curso, la cerramos
     if st.session_state.get('current_registro_id'):
         try:
             queries.stop_activity(conn, st.session_state['current_registro_id'], now)
         except Exception as e:
             st.session_state['last_error'] = f"Error al detener actividad: {str(e)}"
             return
+
+    # Si la nueva actividad es Salida, iniciamos y cerramos inmediatamente
     if new_activity_name == 'Salida':
         try:
-            reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity, comment)
+            reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity_id, comment)
             queries.stop_activity(conn, reg_id, now)
             st.session_state['current_activity_id'] = None
             st.session_state['current_activity_name'] = "Jornada Finalizada"
@@ -98,22 +109,33 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, sub
             st.session_state['last_error'] = f"Error al marcar salida: {str(e)}"
             return
     else:
+        # Iniciamos nueva actividad (dejar en BD la hora de inicio)
         try:
-            new_reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity, comment)
+            new_reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity_id, comment)
             st.session_state['current_activity_id'] = new_activity_id
             st.session_state['current_activity_name'] = new_activity_name
             st.session_state['current_start_time'] = now
             st.session_state['current_registro_id'] = new_reg_id
-            st.session_state['current_subactivity'] = subactivity
+            # Guardamos nombre legible de subactividad si se entregó
+            if subactivity_name:
+                st.session_state['current_subactivity'] = subactivity_name
+            else:
+                # si solo se pasó id, dejamos como estaba o None
+                st.session_state['current_subactivity'] = st.session_state.get('current_subactivity', None)
             st.session_state['current_comment'] = comment
-            subact_text = f" - {subactivity}" if subactivity else ""
+            subact_text = f" - {subactivity_name}" if subactivity_name else (f" - {subactivity_id}" if subactivity_id else "")
             st.session_state['last_success'] = f"✅ Actividad iniciada: {new_activity_name}{subact_text}"
             st.session_state.pop('last_error', None)
             st.session_state.pop('show_subactivity_modal', None)
         except Exception as e:
             st.session_state['last_error'] = f"Error al iniciar actividad: {str(e)}"
             return
-    st.cache_data.clear()
+
+    # Limpiar caches que dependan de datos
+    try:
+        st.cache_data.clear()
+    except:
+        pass
 
 def get_activity_color(activity_name):
     colors = {
@@ -131,12 +153,17 @@ def get_activity_color(activity_name):
     return colors.get(activity_name, '#F5F5F5')
 
 def show_subactivity_modal(conn, activity_id, activity_name):
-    """Muestra modal con selector de subactividad desde BD y campo de comentario"""
+    """Muestra modal con selector de subactividad desde BD y campo de comentario
+       Devuelve (subactivity_id, subactivity_name, full_comment)
+    """
     st.markdown("---")
     st.markdown(f"### 📋 Detalles de {activity_name}")
     
     col1, col2 = st.columns([1, 1])
     
+    selected_subactivity_id = None
+    selected_subactivity_name = None
+
     with col1:
         st.markdown("**Subactividad**")
         
@@ -154,13 +181,16 @@ def show_subactivity_modal(conn, activity_id, activity_name):
                     key=f"subact_{activity_name}_{activity_id}",
                     label_visibility="collapsed"
                 )
-                selected_subactivity_id = options_dict[selected_name]
+                selected_subactivity_id = int(options_dict[selected_name])
+                selected_subactivity_name = selected_name
             else:
                 st.warning("⚠️ No hay subactividades configuradas para esta actividad")
                 selected_subactivity_id = None
+                selected_subactivity_name = None
         except Exception as e:
             st.error(f"Error al cargar subactividades: {e}")
             selected_subactivity_id = None
+            selected_subactivity_name = None
     
     with col2:
         st.markdown("**ID Cliente / Referencia**")
@@ -191,7 +221,7 @@ def show_subactivity_modal(conn, activity_id, activity_name):
     
     st.markdown("---")
     
-    return selected_subactivity_id, full_comment if full_comment else None
+    return selected_subactivity_id, selected_subactivity_name, (full_comment if full_comment else None)
 
 def show_asesor_dashboard(conn):
     user = st.session_state['user_info']
@@ -206,131 +236,28 @@ def show_asesor_dashboard(conn):
     # Verificar y cerrar día si cambió
     check_and_close_day(conn, user_id)
     
-    # CSS personalizado con azul corporativo
+    # CSS personalizado con azul corporativo (incluye ocultar "Manage app" si aparece)
     st.markdown("""
     <style>
-        .block-container {
-            padding-top: 2rem;
-        }
-        
-        .main-header {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: #1E3A5F;
-            margin-bottom: 0.3rem;
-        }
-        
-        .sub-header {
-            color: #6B7280;
-            font-size: 0.95rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        .section-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #1E3A5F;
-            margin: 1.5rem 0 1rem 0;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .current-activity-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%);
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 24px;
-            font-weight: 600;
-            font-size: 1rem;
-            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.25);
-        }
-        
-        .timeline-item {
-            padding: 1rem 1.25rem;
-            border-radius: 12px;
-            margin-bottom: 0.75rem;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        
-        .timeline-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        }
-        
-        .timeline-activity {
-            font-weight: 600;
-            font-size: 0.95rem;
-            color: #1E3A5F;
-            margin-bottom: 0.25rem;
-        }
-        
-        .timeline-subactivity {
-            font-size: 0.85rem;
-            color: #6B7280;
-            font-style: italic;
-            margin-bottom: 0.25rem;
-        }
-        
-        .timeline-comment {
-            font-size: 0.8rem;
-            color: #9CA3AF;
-            margin-top: 0.25rem;
-            padding: 0.25rem 0.5rem;
-            background: rgba(255,255,255,0.5);
-            border-radius: 6px;
-        }
-        
-        .timeline-time {
-            font-weight: 700;
-            font-size: 1rem;
-            color: #4A90E2;
-            margin-top: 0.5rem;
-        }
-        
-        .stButton > button {
-            border-radius: 12px !important;
-            font-weight: 600 !important;
-            transition: all 0.3s ease !important;
-            border: 2px solid transparent !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
-        }
-        
-        .stButton > button:hover:not(:disabled) {
-            transform: translateY(-2px) !important;
-            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3) !important;
-            border-color: #4A90E2 !important;
-        }
-        
-        .stButton > button[kind="primary"] {
-            background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%) !important;
-            color: white !important;
-        }
-        
-        .stButton > button:disabled {
-            opacity: 0.5 !important;
-            cursor: not-allowed !important;
-        }
-        
-        [data-testid="stMetricValue"] {
-            font-size: 1.8rem;
-            color: #4A90E2;
-        }
-        
-        * {
-            transition: all 0.2s ease;
-        }
-        
-        .modal-container {
-            background: #F9FAFB;
-            padding: 1.5rem;
-            border-radius: 12px;
-            border: 2px solid #E5E7EB;
-        }
+        .block-container { padding-top: 2rem; }
+        .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A5F; margin-bottom: 0.3rem; }
+        .sub-header { color: #6B7280; font-size: 0.95rem; margin-bottom: 1.5rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; color: #1E3A5F; margin: 1.5rem 0 1rem 0; display: flex; align-items: center; gap: 0.5rem; }
+        .current-activity-badge { display: inline-flex; align-items: center; gap: 0.5rem; background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%); color: white; padding: 0.75rem 1.5rem; border-radius: 24px; font-weight: 600; font-size: 1rem; box-shadow: 0 4px 12px rgba(74, 144, 226, 0.25); }
+        .timeline-item { padding: 1rem 1.25rem; border-radius: 12px; margin-bottom: 0.75rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s ease, box-shadow 0.2s ease; display:flex; justify-content:space-between; align-items:center; }
+        .timeline-item:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+        .timeline-activity { font-weight: 600; font-size: 0.95rem; color: #1E3A5F; margin-bottom: 0.25rem; }
+        .timeline-subactivity { font-size: 0.85rem; color: #6B7280; font-style: italic; margin-bottom: 0.25rem; }
+        .timeline-comment { font-size: 0.8rem; color: #9CA3AF; margin-top: 0.25rem; padding: 0.25rem 0.5rem; background: rgba(255,255,255,0.5); border-radius: 6px; }
+        .timeline-time { font-weight: 700; font-size: 1rem; color: #4A90E2; margin-left: 1rem; }
+        .stButton > button { border-radius: 12px !important; font-weight: 600 !important; transition: all 0.3s ease !important; border: 2px solid transparent !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
+        .stButton > button:hover:not(:disabled) { transform: translateY(-2px) !important; box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3) !important; border-color: #4A90E2 !important; }
+        .stButton > button[kind="primary"] { background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%) !important; color: white !important; }
+        .stButton > button:disabled { opacity: 0.5 !important; cursor: not-allowed !important; }
+        [data-testid="stMetricValue"] { font-size: 1.8rem; color: #4A90E2; }
+        * { transition: all 0.2s ease; }
+        .modal-container { background: #F9FAFB; padding: 1.5rem; border-radius: 12px; border: 2px solid #E5E7EB; }
+        [data-testid="manage-app-button"] { display:none !important; }
     </style>
     """, unsafe_allow_html=True)
     
@@ -397,24 +324,29 @@ def show_asesor_dashboard(conn):
         
         with st.container():
             st.markdown('<div class="modal-container">', unsafe_allow_html=True)
-            subactivity, comment = show_subactivity_modal(conn, activity_info['id'], activity_info['name'])
+            subactivity_id, subactivity_name, comment = show_subactivity_modal(conn, activity_info['id'], activity_info['name'])
             
             col1, col2, col3 = st.columns([1, 1, 2])
             
             if col1.button("✅ Confirmar", type="primary", width='stretch'):
+                # Pasamos both id y name (si name es None se pasa None)
                 handle_activity_click(
                     conn, 
                     user['id'], 
                     activity_info['id'], 
                     activity_info['name'],
-                    subactivity,
-                    comment
+                    subactivity_id,
+                    comment,
+                    subactivity_name
                 )
+                # limpiamos modal pending y recargamos
+                st.session_state.pop('show_subactivity_modal', None)
+                st.session_state.pop('pending_activity', None)
                 st.rerun()
             
             if col2.button("❌ Cancelar", width='stretch'):
-                st.session_state.pop('show_subactivity_modal')
-                st.session_state.pop('pending_activity')
+                st.session_state.pop('show_subactivity_modal', None)
+                st.session_state.pop('pending_activity', None)
                 st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
@@ -462,7 +394,6 @@ def show_asesor_dashboard(conn):
                      disabled=disabled,
                      type="primary"):
             
- 
             if activity_name in activities_with_details:
                 st.session_state['show_subactivity_modal'] = True
                 st.session_state['pending_activity'] = {
@@ -535,8 +466,7 @@ def show_asesor_dashboard(conn):
             st.bar_chart(
                 chart_df,
                 height=280,
-                width='stretch',
-                color='#4A90E2'
+                width='stretch'
             )
             
         else:
@@ -548,14 +478,48 @@ def show_asesor_dashboard(conn):
     st.markdown('<div class="section-title">🕐 Histórico de Actividades</div>', unsafe_allow_html=True)
     try:
         # Pasa 'today_date' como argumento
-        log_df = queries.get_today_log(conn, user_id, today_date) # (Usando la corrección anterior)
+        log_df = queries.get_today_log(conn, user_id, today_date)
         
+        # Si hay actividad en curso, la agregamos visualmente al log (sin depender de que la BD la haya cerrado)
+        if (log_df is None) or (hasattr(log_df, "empty") and log_df.empty):
+            log_df = pd.DataFrame(columns=['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion'])
+
+        if st.session_state.get('current_registro_id'):
+            # Construir fila para la actividad en curso con formato igual al query
+            cur_name = st.session_state.get('current_activity_name', 'N/A')
+            cur_sub = st.session_state.get('current_subactivity', None) or '-'
+            cur_comment = st.session_state.get('current_comment', None) or '-'
+            cur_inicio = st.session_state.get('current_start_time')
+            # Duración calculada en tiempo real
+            if cur_inicio:
+                cur_dur = format_timedelta(datetime.now() - cur_inicio)
+                # Para la columna "inicio" imitar formato 'HH24:MI' usado en la query
+                inicio_str = cur_inicio.strftime("%H:%M")
+            else:
+                cur_dur = 'En curso'
+                inicio_str = '-'
+            current_row = pd.DataFrame([{
+                'nombre_actividad': cur_name,
+                'subactividad': cur_sub,
+                'comentario': cur_comment,
+                'inicio': inicio_str,
+                'duracion': cur_dur
+            }])
+            # Concatenamos al dataframe existente (dejar al inicio para verse primero)
+            log_df = pd.concat([current_row, log_df], ignore_index=True)
+
         if not log_df.empty:
             # Tabla detallada con toda la información
             st.markdown("**Registro completo del día**")
             
-            # Crear DataFrame para mostrar
+            # Crear DataFrame para mostrar (copiar y renombrar columnas)
             display_log = log_df.copy()
+            # Asegurarnos que las columnas existan
+            for c in ['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion']:
+                if c not in display_log.columns:
+                    display_log[c] = '-'
+            
+            display_log = display_log[['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion']]
             display_log.columns = ['Actividad', 'Subactividad', 'Comentario', 'Hora Inicio', 'Duración']
             
             # Reemplazar valores None con "-"
@@ -576,13 +540,13 @@ def show_asesor_dashboard(conn):
             
             st.markdown("---")
             
-            # Timeline visual (opcional, más visual)
+            # Timeline visual (más visual)
             st.markdown("**Línea de Tiempo Visual**")
 
             for _, row in log_df.iterrows():
                 activity_name = row.get('nombre_actividad', 'N/A')
-                subactivity = row.get('subactividad', '')
-                comment = row.get('comentario', '')
+                subactivity = row.get('subactividad', '') or ''
+                comment = row.get('comentario', '') or ''
                 inicio = row.get('inicio', '')
                 duration = row.get('duracion', 'En curso')
                 color = get_activity_color(activity_name)
@@ -598,11 +562,11 @@ def show_asesor_dashboard(conn):
                 }
                 emoji = emoji_map.get(activity_name, '📌')
                 
-                # Formatear la hora de inicio correctamente
-                if isinstance(inicio, datetime):
-                    inicio_str = inicio.strftime("%H:%M:%S")
-                else:
-                    inicio_str = str(inicio) if inicio else "N/A"
+                inicio_str = str(inicio) if inicio else "N/A"
+                
+                display_comment = ''
+                if comment and comment != '-':
+                    display_comment = escape(comment if len(comment) <= 120 else comment[:117] + "...")
                 
                 timeline_html = f"""
                 <div class="timeline-item" style="background-color: {color};">
@@ -611,17 +575,14 @@ def show_asesor_dashboard(conn):
                 """
                 
                 if subactivity and subactivity != '-':
-                    timeline_html += f'<div class="timeline-subactivity">→ {subactivity}</div>'
+                    timeline_html += f'<div class="timeline-subactivity">→ {escape(str(subactivity))}</div>'
                 
-                if comment and comment != '-':
-                    display_comment = comment if len(comment) <= 80 else comment[:77] + "..."
-                    safe_comment = escape(display_comment)
-                    timeline_html += f'<div class="timeline-comment">{safe_comment}</div>'
+                if display_comment:
+                    timeline_html += f'<div class="timeline-comment">{display_comment}</div>'
                 
-                # ✅ CORRECCIÓN: Cerrar el div antes de la duración
                 timeline_html += f"""
                     </div>
-                    <div class="timeline-time">{duration}</div>
+                    <div class="timeline-time">{escape(str(duration))}</div>
                 </div>
                 """
                 

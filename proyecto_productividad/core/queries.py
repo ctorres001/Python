@@ -1,22 +1,33 @@
-import streamlit as st
+# core/queries.py
+"""
+Capa de acceso a datos para la app Control de Actividades (Neon - PostgreSQL).
+Lecturas: se asume que `conn` es un objeto devuelto por st.connection("neon_db", type="sql")
+          que implementa .query(sql, params=..., ttl=...)
+Escrituras: se usa SQLAlchemy engine obtenido desde core.engine_connection.get_engine()
+            para realizar transacciones con begin() y RETURNING cuando aplica.
+"""
+
 from datetime import datetime, time as dt_time
-from sqlalchemy import text
 import pandas as pd
+from sqlalchemy import text
 from core.engine_connection import get_engine
 
 
-# ======================================================
-# 🧩 CONSULTAS DE USUARIO Y AUTENTICACIÓN
-# ======================================================
+# ---------------------------
+# === ASESOR (Operaciones) ===
+# ---------------------------
 
 def get_user_by_username(conn, username):
-    """Obtiene la información completa de un usuario, su rol y campaña."""
+    """
+    Devuelve fila con datos del usuario (incluye rol y campaña).
+    Retorna un DataFrame o None si no existe.
+    """
     df = conn.query(
         """
-        SELECT u.*, r.nombre as rol_nombre, c.nombre as campaña_nombre 
-        FROM usuarios u 
-        LEFT JOIN roles r ON u.rol_id = r.id 
-        LEFT JOIN campañas c ON u.campaña_id = c.id 
+        SELECT u.*, r.nombre as rol_nombre, c.nombre as campaña_nombre
+        FROM usuarios u
+        LEFT JOIN roles r ON u.rol_id = r.id
+        LEFT JOIN campañas c ON u.campaña_id = c.id
         WHERE u.nombre_usuario = :username
         """,
         params={"username": username},
@@ -25,27 +36,28 @@ def get_user_by_username(conn, username):
     return df.to_dict('records')[0] if not df.empty else None
 
 
-# ======================================================
-# 🧩 CONSULTAS DEL ASESOR
-# ======================================================
-
 def get_active_activities(conn):
-    """Obtiene todas las actividades activas, ordenadas."""
-    # CAMBIO AQUÍ: Ordenar por 'orden', y luego por 'id' como desempate
-    return conn.query("SELECT * FROM actividades WHERE activo = TRUE ORDER BY orden, id", ttl=600)
+    """
+    Lista de actividades activas ordenadas (id, nombre_actividad, orden, etc.)
+    """
+    return conn.query(
+        "SELECT id, nombre_actividad, orden FROM actividades WHERE activo = TRUE ORDER BY orden, id",
+        ttl=600
+    )
 
 
 def get_subactivities(conn, activity_id):
     """
-    Obtiene las subactividades disponibles para una actividad específica.
+    Subactividades activas para una actividad.
+    Devuelve DataFrame con columnas: id, nombre_subactividad, orden, activo.
     """
     df = conn.query(
         """
         SELECT id, nombre_subactividad
         FROM subactividades
         WHERE actividad_id = :activity_id
-        AND activo = TRUE
-        ORDER BY orden
+          AND activo = TRUE
+        ORDER BY orden, nombre_subactividad
         """,
         params={"activity_id": activity_id},
         ttl=600
@@ -55,26 +67,28 @@ def get_subactivities(conn, activity_id):
 
 def get_activity_by_name(conn, activity_name):
     """
-    Obtiene el ID de una actividad por su nombre.
+    Devuelve id de actividad por nombre (o None).
     """
     df = conn.query(
-        "SELECT id FROM actividades WHERE nombre_actividad = :name",
+        "SELECT id FROM actividades WHERE nombre_actividad = :name LIMIT 1",
         params={"name": activity_name},
         ttl=600
     )
-    return df['id'].iloc[0] if not df.empty else None
+    return int(df['id'].iloc[0]) if not df.empty else None
 
 
 def get_last_activity_status(conn, user_id):
-    """Obtiene el último registro de actividad de un usuario."""
+    """
+    Último registro de actividad (más reciente) para un usuario.
+    """
     df = conn.query(
         """
         SELECT r.*, a.nombre_actividad, s.nombre_subactividad
         FROM registro_actividades r
         JOIN actividades a ON r.actividad_id = a.id
         LEFT JOIN subactividades s ON r.subactividad_id = s.id
-        WHERE r.usuario_id = :user_id 
-        ORDER BY r.id DESC 
+        WHERE r.usuario_id = :user_id
+        ORDER BY r.id DESC
         LIMIT 1
         """,
         params={"user_id": user_id},
@@ -85,8 +99,8 @@ def get_last_activity_status(conn, user_id):
 
 def get_open_activity(conn, user_id, date):
     """
-    Obtiene la actividad abierta del usuario (si existe).
-    Solo busca actividades del día actual sin hora_fin.
+    Obtiene la actividad abierta del usuario (si existe) para la fecha indicada.
+    Retorna DataFrame (puede venir vacío).
     """
     df = conn.query(
         """
@@ -102,12 +116,12 @@ def get_open_activity(conn, user_id, date):
         JOIN actividades a ON r.actividad_id = a.id
         LEFT JOIN subactividades s ON r.subactividad_id = s.id
         WHERE r.usuario_id = :user_id 
-        AND r.hora_fin IS NULL
-        AND r.fecha = :date
+          AND r.hora_fin IS NULL
+          AND r.fecha = :date
         ORDER BY r.hora_inicio DESC
         LIMIT 1
         """,
-        params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
+        params={"user_id": user_id, "date": date},
         ttl=0
     )
     return df if not df.empty else pd.DataFrame()
@@ -115,61 +129,62 @@ def get_open_activity(conn, user_id, date):
 
 def start_activity(conn, user_id, actividad_id, hora_inicio, subactividad_id=None, comentario=None):
     """
-    Inicia una nueva actividad con subactividad (ID) y comentario opcionales.
+    Inserta un nuevo registro en registro_actividades y retorna el id del registro creado.
+    Usa engine (SQLAlchemy) para asegurar commit y RETURNING.
     """
-    import sys
     engine = get_engine()
     try:
         with engine.begin() as connection:
             result = connection.execute(
                 text("""
-                    INSERT INTO public.registro_actividades 
-                    (usuario_id, actividad_id, fecha, hora_inicio, subactividad_id, observaciones, estado) -- CAMBIO AQUÍ
+                    INSERT INTO public.registro_actividades
+                    (usuario_id, actividad_id, fecha, hora_inicio, subactividad_id, observaciones, estado)
                     VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, :subactividad_id, :comentario, 'Iniciado')
                     RETURNING id
                 """),
                 {
-                    "user_id": user_id, 
-                    "actividad_id": actividad_id, 
+                    "user_id": int(user_id),
+                    "actividad_id": int(actividad_id),
                     "hora_inicio": hora_inicio,
-                    "subactividad_id": subactividad_id,
+                    "subactividad_id": int(subactividad_id) if subactividad_id is not None else None,
                     "comentario": comentario
                 }
             )
             registro_id = result.scalar()
-            print(f"DEBUG: Actividad iniciada con ID: {registro_id}, Subactividad ID: {subactividad_id}", file=sys.stderr)
-            return registro_id
+            return int(registro_id) if registro_id is not None else None
     except Exception as e:
-        print(f"Error en start_activity: {e}", file=sys.stderr)
-        raise
+        raise Exception(f"Error en start_activity: {e}")
 
 
 def stop_activity(conn, registro_id, hora_fin):
     """
-    Finaliza una actividad y calcula duración.
+    Actualiza registro para asignar hora_fin y calcular duración en segundos y formato hms.
+    Usa engine para garantizar transacción.
     """
     engine = get_engine()
     try:
         with engine.begin() as connection:
             connection.execute(
                 text("""
-                    UPDATE public.registro_actividades 
+                    UPDATE public.registro_actividades
                     SET 
-                        hora_fin = :hora_fin, 
+                        hora_fin = :hora_fin,
                         estado = 'Finalizado',
                         duracion_seg = EXTRACT(EPOCH FROM (:hora_fin - hora_inicio)),
                         duracion_hms = (:hora_fin - hora_inicio)
                     WHERE id = :registro_id
+                      AND hora_fin IS NULL
                 """),
                 {"registro_id": registro_id, "hora_fin": hora_fin}
             )
     except Exception as e:
-        raise Exception(f"Error en stop_activity: {str(e)}")
+        raise Exception(f"Error en stop_activity: {e}")
 
 
 def close_previous_day_activities(conn, user_id, previous_date):
     """
-    Cierra todas las actividades abiertas de un día anterior a las 23:59:59.
+    Cierra todas las actividades abiertas de previous_date estableciendo hora_fin a 23:59:59.
+    Retorna cantidad de filas afectadas.
     """
     engine = get_engine()
     try:
@@ -184,24 +199,20 @@ def close_previous_day_activities(conn, user_id, previous_date):
                         duracion_seg = EXTRACT(EPOCH FROM (:hora_fin - hora_inicio)),
                         duracion_hms = (:hora_fin - hora_inicio)
                     WHERE usuario_id = :user_id
-                    AND hora_fin IS NULL
-                    AND fecha = :fecha
+                      AND hora_fin IS NULL
+                      AND fecha = :fecha
                 """),
-                {
-                    "user_id": user_id,
-                    "fecha": previous_date,
-                    "hora_fin": end_time
-                }
+                {"user_id": user_id, "fecha": previous_date, "hora_fin": end_time}
             )
             return result.rowcount
     except Exception as e:
-        raise Exception(f"Error en close_previous_day_activities: {str(e)}")
+        raise Exception(f"Error en close_previous_day_activities: {e}")
 
 
 def get_today_summary(conn, user_id, date):
     """
-    Obtiene el resumen consolidado del día con totales por actividad.
-    Incluye actividades en curso calculando hasta el momento actual.
+    Resumen del día con totales por actividad (incluye actividades en curso sumando NOW()).
+    Retorna DataFrame con columnas: nombre_actividad, total_segundos
     """
     df = conn.query(
         """
@@ -222,26 +233,23 @@ def get_today_summary(conn, user_id, date):
         GROUP BY a.nombre_actividad
         ORDER BY total_segundos DESC
         """,
-        params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
+        params={"user_id": user_id, "date": date},
         ttl=0
     )
     return df
 
 
-# Archivo: queries.py
-# Función: get_today_log
-
 def get_today_log(conn, user_id, date):
     """
-    Obtiene el log detallado del día con todas las actividades.
-    Incluye subactividad y comentario.
+    Log detallado del día. Columnas devueltas:
+    nombre_actividad, subactividad, comentario, inicio (HH24:MI), duracion (HH24:MI:SS o 'En curso')
     """
     df = conn.query(
         """
         SELECT 
             a.nombre_actividad,
             s.nombre_subactividad as subactividad,
-            r.observaciones as comentario, -- <<-- CAMBIO REALIZADO AQUÍ
+            r.observaciones as comentario,
             to_char(r.hora_inicio, 'HH24:MI') as inicio,
             CASE 
                 WHEN r.hora_fin IS NULL THEN 'En curso'
@@ -254,7 +262,7 @@ def get_today_log(conn, user_id, date):
           AND r.fecha = :date
         ORDER BY r.hora_inicio DESC
         """,
-        params={"user_id": user_id, "date": date}, # <--- Añadir 'date'
+        params={"user_id": user_id, "date": date},
         ttl=0
     )
     return df
@@ -262,8 +270,8 @@ def get_today_log(conn, user_id, date):
 
 def get_activity_stats(conn, user_id, start_date, end_date):
     """
-    Obtiene estadísticas de actividades en un rango de fechas.
-    Útil para reportes semanales o mensuales.
+    Estadísticas por actividad/subactividad en rango de fechas.
+    Devuelve: nombre_actividad, subactividad, cantidad_registros, total_horas, promedio_minutos
     """
     df = conn.query(
         """
@@ -303,7 +311,8 @@ def get_activity_stats(conn, user_id, start_date, end_date):
 
 def get_user_productivity_summary(conn, user_id, date):
     """
-    Obtiene un resumen de productividad del usuario para una fecha específica.
+    Resumen de productividad del usuario en una fecha.
+    Retorna: total_actividades, tipos_actividad, primera_actividad, ultima_actividad, horas_trabajadas
     """
     df = conn.query(
         """
@@ -330,45 +339,43 @@ def get_user_productivity_summary(conn, user_id, date):
     return df
 
 
-# ======================================================
-# 🧩 CONSULTAS DEL SUPERVISOR
-# ======================================================
+# --------------------------------
+# === SUPERVISOR (Reportes) ===
+# --------------------------------
 
 def get_supervisor_dashboard(conn, campaña_id, fecha):
     """
-    Obtiene el resumen de asesores de una campaña para una fecha.
-    Ahora incluye el cálculo de actividades en curso.
+    Dashboard de supervisor para una campaña y fecha dada.
+    Devuelve: nombre_completo, ingreso, salida, tiempo_total_jornada, tiempo_efectivo, estado_actual
     """
     df = conn.query(
         """
         WITH Jornadas AS (
             SELECT
-                usuario_id,
-                MIN(hora_inicio) as hora_ingreso,
-                MAX(COALESCE(hora_fin, NOW())) as hora_salida
+                r.usuario_id,
+                MIN(r.hora_inicio) as hora_ingreso,
+                MAX(COALESCE(r.hora_fin, NOW())) as hora_salida
             FROM registro_actividades r
-            JOIN actividades a ON r.actividad_id = a.id
             WHERE r.fecha = :fecha
             GROUP BY r.usuario_id
         ),
         Efectivo AS (
             SELECT
-                usuario_id,
+                r.usuario_id,
                 SUM(
                     CASE 
-                        WHEN hora_fin IS NULL THEN 
-                            EXTRACT(EPOCH FROM (NOW() - hora_inicio))
+                        WHEN r.hora_fin IS NULL THEN 
+                            EXTRACT(EPOCH FROM (NOW() - r.hora_inicio))
                         ELSE 
-                            duracion_seg
+                            r.duracion_seg
                     END
                 ) as segundos_efectivos
-            FROM registro_actividades
-            WHERE fecha = :fecha
-              AND actividad_id NOT IN (
-                  SELECT id FROM actividades 
-                  WHERE nombre_actividad IN ('Break Salida', 'Regreso Break')
-              )
-            GROUP BY usuario_id
+            FROM registro_actividades r
+            WHERE r.fecha = :fecha
+            AND r.actividad_id NOT IN (
+                SELECT id FROM actividades WHERE nombre_actividad IN ('Break Salida', 'Regreso Break')
+            )
+            GROUP BY r.usuario_id
         )
         SELECT 
             u.nombre_completo,
@@ -400,7 +407,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
 
 def get_team_activity_breakdown(conn, campaña_id, fecha):
     """
-    Obtiene el desglose de actividades por asesor en una campaña.
+    Desglose de actividades por asesor dentro de una campaña en una fecha.
     """
     df = conn.query(
         """
@@ -432,12 +439,14 @@ def get_team_activity_breakdown(conn, campaña_id, fecha):
     return df
 
 
-# ======================================================
-# 🧩 CONSULTAS DEL ADMINISTRADOR
-# ======================================================
+# --------------------------------
+# === ADMINISTRADOR (CRUD + Reportes) ===
+# --------------------------------
 
 def get_all_users_admin(conn):
-    """Obtiene todos los usuarios para administración."""
+    """
+    Lista de usuarios con rol y campaña para la vista admin.
+    """
     return conn.query("""
         SELECT u.id, u.nombre_usuario, u.nombre_completo, r.nombre as rol, c.nombre as campaña, u.estado 
         FROM usuarios u 
@@ -448,14 +457,15 @@ def get_all_users_admin(conn):
 
 
 def get_dropdown_data(conn):
-    """Obtiene roles y campañas para dropdowns."""
-    roles = conn.query("SELECT id, nombre FROM roles", ttl=3600)
-    campañas = conn.query("SELECT id, nombre FROM campañas", ttl=3600)
+    """
+    Devuelve listas de roles y campañas para dropdowns.
+    """
+    roles = conn.query("SELECT id, nombre FROM roles WHERE activo = TRUE ORDER BY nombre", ttl=3600)
+    campañas = conn.query("SELECT id, nombre FROM campañas WHERE activo = TRUE ORDER BY nombre", ttl=3600)
     return roles.to_dict('records'), campañas.to_dict('records')
 
 
 def check_username_exists(conn, username: str) -> bool:
-    """Verifica si un usuario ya existe."""
     df = conn.query(
         "SELECT id FROM usuarios WHERE nombre_usuario = :username",
         params={"username": username},
@@ -465,7 +475,9 @@ def check_username_exists(conn, username: str) -> bool:
 
 
 def update_user_admin(conn, user_id, nombre_completo, rol_id, campaña_id, estado):
-    """Actualiza información de un usuario."""
+    """
+    Actualiza datos básicos de usuario (para admin). Usa engine (transactional).
+    """
     engine = get_engine()
     try:
         with engine.begin() as connection:
@@ -478,33 +490,31 @@ def update_user_admin(conn, user_id, nombre_completo, rol_id, campaña_id, estad
                 {"nc": nombre_completo, "ri": rol_id, "ci": campaña_id, "e": estado, "uid": user_id}
             )
     except Exception as e:
-        raise Exception(f"Error en update_user_admin: {str(e)}")
+        raise Exception(f"Error en update_user_admin: {e}")
 
 
 def create_user_admin(conn, username, password, nombre_completo, rol_id, campaña_id):
-    """Crea un nuevo usuario."""
+    """
+    Crea un usuario (admin). Usa engine.
+    """
     engine = get_engine()
     try:
         with engine.begin() as connection:
             connection.execute(
                 text("""
                     INSERT INTO public.usuarios 
-                    (nombre_usuario, contraseña, nombre_completo, rol_id, campaña_id)
-                    VALUES (:u, :p, :nc, :ri, :ci)
+                    (nombre_usuario, contraseña, nombre_completo, rol_id, campaña_id, estado)
+                    VALUES (:u, :p, :nc, :ri, :ci, TRUE)
                 """),
                 {"u": username, "p": password, "nc": nombre_completo, "ri": rol_id, "ci": campaña_id}
             )
     except Exception as e:
-        raise Exception(f"Error en create_user_admin: {str(e)}")
+        raise Exception(f"Error en create_user_admin: {e}")
 
-
-# ======================================================
-# 🧩 CONSULTAS DE SUBACTIVIDADES (ADMIN)
-# ======================================================
 
 def get_all_subactivities(conn):
     """
-    Obtiene todas las subactividades con sus actividades relacionadas.
+    Obtiene todas las subactividades con el nombre de su actividad padre.
     """
     df = conn.query(
         """
@@ -525,7 +535,7 @@ def get_all_subactivities(conn):
 
 def create_subactivity(conn, actividad_id, nombre_subactividad, orden=0):
     """
-    Crea una nueva subactividad.
+    Inserta subactividad (usa engine).
     """
     engine = get_engine()
     try:
@@ -539,13 +549,10 @@ def create_subactivity(conn, actividad_id, nombre_subactividad, orden=0):
                 {"aid": actividad_id, "nombre": nombre_subactividad, "orden": orden}
             )
     except Exception as e:
-        raise Exception(f"Error en create_subactivity: {str(e)}")
+        raise Exception(f"Error en create_subactivity: {e}")
 
 
 def update_subactivity(conn, subactivity_id, nombre_subactividad, activo, orden):
-    """
-    Actualiza una subactividad existente.
-    """
     engine = get_engine()
     try:
         with engine.begin() as connection:
@@ -558,13 +565,10 @@ def update_subactivity(conn, subactivity_id, nombre_subactividad, activo, orden)
                 {"nombre": nombre_subactividad, "activo": activo, "orden": orden, "sid": subactivity_id}
             )
     except Exception as e:
-        raise Exception(f"Error en update_subactivity: {str(e)}")
+        raise Exception(f"Error en update_subactivity: {e}")
 
 
 def delete_subactivity(conn, subactivity_id):
-    """
-    Elimina (desactiva) una subactividad.
-    """
     engine = get_engine()
     try:
         with engine.begin() as connection:
@@ -573,4 +577,56 @@ def delete_subactivity(conn, subactivity_id):
                 {"sid": subactivity_id}
             )
     except Exception as e:
-        raise Exception(f"Error en delete_subactivity: {str(e)}")
+        raise Exception(f"Error en delete_subactivity: {e}")
+
+
+# --------------------------------
+# === UTILIDADES / REPORTES VARIOS
+# --------------------------------
+
+def get_user_log(conn, user_id, start_date, end_date):
+    """
+    Histórico de actividades de un usuario en un rango.
+    """
+    df = conn.query(
+        """
+        SELECT 
+            DATE(r.hora_inicio) AS fecha,
+            a.nombre_actividad,
+            COALESCE(s.nombre_subactividad, '-') AS subactividad,
+            COALESCE(r.observaciones, '-') AS comentario,
+            TO_CHAR(r.hora_inicio, 'HH24:MI') AS inicio,
+            TO_CHAR(r.hora_fin, 'HH24:MI') AS fin,
+            CASE
+                WHEN r.hora_fin IS NULL THEN 'En curso'
+                ELSE TO_CHAR((r.hora_fin - r.hora_inicio), 'HH24:MI:SS')
+            END AS duracion
+        FROM registro_actividades r
+        JOIN actividades a ON a.id = r.actividad_id
+        LEFT JOIN subactividades s ON s.id = r.subactividad_id
+        WHERE r.usuario_id = :user_id
+          AND r.fecha BETWEEN :start_date AND :end_date
+        ORDER BY r.hora_inicio DESC
+        """,
+        params={"user_id": user_id, "start_date": start_date, "end_date": end_date},
+        ttl=300
+    )
+    return df
+
+
+def get_all_activities_admin(conn):
+    """
+    Lista de actividades (para CRUD admin).
+    """
+    return conn.query("SELECT * FROM actividades ORDER BY orden, id", ttl=300)
+
+
+def validate_connection(conn):
+    """
+    Simple check de conexión (devuelve True/False).
+    """
+    try:
+        _ = conn.query("SELECT 1", ttl=0)
+        return True
+    except Exception:
+        return False
