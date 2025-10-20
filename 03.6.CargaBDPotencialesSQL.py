@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivos por defecto
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\09. Setiembre\BD14092025\BD14092025.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\10. Octubre\BD01102025\BD01102025.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
@@ -87,16 +87,19 @@ MAPEO_NOMBRES_COLUMNAS = {
     "Cta.Ctto 3": "Cta_Ctto_3",
     "Distrito 3": "Distrito_3",
     "Dirección 3": "Direccion_3",
+    "Dirección3": "Direccion_3",
     "NSE 3": "NSE_3",
     "FechaAlta3": "FechaAlta3",
     "Cta.Ctto 4": "Cta_Ctto_4",
     "Distrito 4": "Distrito_4",
-    "Dirección 4": "Direccion_4",  # CORREGIDO
+    "Dirección 4": "Direccion_4",
+    "Dirección4": "Direccion_4",
     "NSE 4": "NSE_4",
     "FechaAlta4": "FechaAlta4",
     "Cta.Ctto 5": "Cta_Ctto_5",
     "Distrito 5": "Distrito_5",
-    "Dirección 5": "Direccion_5",  # CORREGIDO
+    "Dirección 5": "Direccion_5",
+    "Dirección5": "Direccion_5",
     "NSE 5": "NSE_5",
     "FechaAlta5": "FechaAlta5",
     "CaCta": "CaCta",
