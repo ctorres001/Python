@@ -53,7 +53,7 @@ def get_subactivities(conn, activity_id):
     """
     df = conn.query(
         """
-        SELECT id, nombre_subactividad
+        SELECT id, nombre_subactividad, orden, activo
         FROM subactividades
         WHERE actividad_id = :activity_id
           AND activo = TRUE
@@ -131,6 +131,7 @@ def start_activity(conn, user_id, actividad_id, hora_inicio, subactividad_id=Non
     """
     Inserta un nuevo registro en registro_actividades y retorna el id del registro creado.
     Usa engine (SQLAlchemy) para asegurar commit y RETURNING.
+    CORREGIDO: Usa CURRENT_TIMESTAMP de PostgreSQL en lugar de hora de Python
     """
     engine = get_engine()
     try:
@@ -139,15 +140,14 @@ def start_activity(conn, user_id, actividad_id, hora_inicio, subactividad_id=Non
                 text("""
                     INSERT INTO public.registro_actividades
                     (usuario_id, actividad_id, fecha, hora_inicio, subactividad_id, observaciones, estado)
-                    VALUES (:user_id, :actividad_id, CURRENT_DATE, :hora_inicio, :subactividad_id, :comentario, 'Iniciado')
+                    VALUES (:user_id, :actividad_id, CURRENT_DATE, CURRENT_TIMESTAMP, :subactividad_id, :comentario, 'Iniciado')
                     RETURNING id
                 """),
                 {
                     "user_id": int(user_id),
                     "actividad_id": int(actividad_id),
-                    "hora_inicio": hora_inicio,
                     "subactividad_id": int(subactividad_id) if subactividad_id is not None else None,
-                    "comentario": comentario
+                    "comentario": comentario if comentario else None
                 }
             )
             registro_id = result.scalar()
@@ -160,6 +160,7 @@ def stop_activity(conn, registro_id, hora_fin):
     """
     Actualiza registro para asignar hora_fin y calcular duración en segundos y formato hms.
     Usa engine para garantizar transacción.
+    CORREGIDO: Usa CURRENT_TIMESTAMP de PostgreSQL en lugar de hora de Python
     """
     engine = get_engine()
     try:
@@ -168,14 +169,14 @@ def stop_activity(conn, registro_id, hora_fin):
                 text("""
                     UPDATE public.registro_actividades
                     SET 
-                        hora_fin = :hora_fin,
+                        hora_fin = CURRENT_TIMESTAMP,
                         estado = 'Finalizado',
-                        duracion_seg = EXTRACT(EPOCH FROM (:hora_fin - hora_inicio)),
-                        duracion_hms = (:hora_fin - hora_inicio)
+                        duracion_seg = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - hora_inicio)),
+                        duracion_hms = (CURRENT_TIMESTAMP - hora_inicio)
                     WHERE id = :registro_id
                       AND hora_fin IS NULL
                 """),
-                {"registro_id": registro_id, "hora_fin": hora_fin}
+                {"registro_id": registro_id}
             )
     except Exception as e:
         raise Exception(f"Error en stop_activity: {e}")
@@ -213,6 +214,7 @@ def get_today_summary(conn, user_id, date):
     """
     Resumen del día con totales por actividad (incluye actividades en curso sumando NOW()).
     Retorna DataFrame con columnas: nombre_actividad, total_segundos
+    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
     """
     df = conn.query(
         """
@@ -221,9 +223,9 @@ def get_today_summary(conn, user_id, date):
             SUM(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (NOW() - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
                     ELSE 
-                        r.duracion_seg
+                        COALESCE(r.duracion_seg, 0)
                 END
             ) as total_segundos
         FROM registro_actividades r 
@@ -272,6 +274,7 @@ def get_activity_stats(conn, user_id, start_date, end_date):
     """
     Estadísticas por actividad/subactividad en rango de fechas.
     Devuelve: nombre_actividad, subactividad, cantidad_registros, total_horas, promedio_minutos
+    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
     """
     df = conn.query(
         """
@@ -282,17 +285,17 @@ def get_activity_stats(conn, user_id, start_date, end_date):
             SUM(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (NOW() - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
                     ELSE 
-                        r.duracion_seg
+                        COALESCE(r.duracion_seg, 0)
                 END
             ) / 3600 as total_horas,
             AVG(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (NOW() - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
                     ELSE 
-                        r.duracion_seg
+                        COALESCE(r.duracion_seg, 0)
                 END
             ) / 60 as promedio_minutos
         FROM registro_actividades r
@@ -313,6 +316,7 @@ def get_user_productivity_summary(conn, user_id, date):
     """
     Resumen de productividad del usuario en una fecha.
     Retorna: total_actividades, tipos_actividad, primera_actividad, ultima_actividad, horas_trabajadas
+    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
     """
     df = conn.query(
         """
@@ -320,13 +324,13 @@ def get_user_productivity_summary(conn, user_id, date):
             COUNT(*) as total_actividades,
             COUNT(DISTINCT actividad_id) as tipos_actividad,
             MIN(hora_inicio) as primera_actividad,
-            MAX(COALESCE(hora_fin, NOW())) as ultima_actividad,
+            MAX(COALESCE(hora_fin, CURRENT_TIMESTAMP)) as ultima_actividad,
             SUM(
                 CASE 
                     WHEN hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (NOW() - hora_inicio))
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - hora_inicio))
                     ELSE 
-                        duracion_seg
+                        COALESCE(duracion_seg, 0)
                 END
             ) / 3600 as horas_trabajadas
         FROM registro_actividades
@@ -347,6 +351,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
     """
     Dashboard de supervisor para una campaña y fecha dada.
     Devuelve: nombre_completo, ingreso, salida, tiempo_total_jornada, tiempo_efectivo, estado_actual
+    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
     """
     df = conn.query(
         """
@@ -354,7 +359,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
             SELECT
                 r.usuario_id,
                 MIN(r.hora_inicio) as hora_ingreso,
-                MAX(COALESCE(r.hora_fin, NOW())) as hora_salida
+                MAX(COALESCE(r.hora_fin, CURRENT_TIMESTAMP)) as hora_salida
             FROM registro_actividades r
             WHERE r.fecha = :fecha
             GROUP BY r.usuario_id
@@ -365,9 +370,9 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
                 SUM(
                     CASE 
                         WHEN r.hora_fin IS NULL THEN 
-                            EXTRACT(EPOCH FROM (NOW() - r.hora_inicio))
+                            EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
                         ELSE 
-                            r.duracion_seg
+                            COALESCE(r.duracion_seg, 0)
                     END
                 ) as segundos_efectivos
             FROM registro_actividades r
@@ -408,6 +413,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
 def get_team_activity_breakdown(conn, campaña_id, fecha):
     """
     Desglose de actividades por asesor dentro de una campaña en una fecha.
+    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
     """
     df = conn.query(
         """
@@ -419,9 +425,9 @@ def get_team_activity_breakdown(conn, campaña_id, fecha):
             SUM(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (NOW() - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
                     ELSE 
-                        r.duracion_seg
+                        COALESCE(r.duracion_seg, 0)
                 END
             ) / 3600 as horas_totales
         FROM registro_actividades r
@@ -459,9 +465,10 @@ def get_all_users_admin(conn):
 def get_dropdown_data(conn):
     """
     Devuelve listas de roles y campañas para dropdowns.
+    CORREGIDO: Removido filtro por 'activo' que no existe en las tablas
     """
-    roles = conn.query("SELECT id, nombre FROM roles WHERE activo = TRUE ORDER BY nombre", ttl=3600)
-    campañas = conn.query("SELECT id, nombre FROM campañas WHERE activo = TRUE ORDER BY nombre", ttl=3600)
+    roles = conn.query("SELECT id, nombre FROM roles ORDER BY nombre", ttl=3600)
+    campañas = conn.query("SELECT id, nombre FROM campañas ORDER BY nombre", ttl=3600)
     return roles.to_dict('records'), campañas.to_dict('records')
 
 

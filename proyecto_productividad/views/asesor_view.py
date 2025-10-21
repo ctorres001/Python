@@ -1,4 +1,4 @@
-# asesor_view.py (versión corregida)
+# asesor_view.py (versión corregida y optimizada)
 import streamlit as st
 from core import queries
 from datetime import datetime, time as dt_time
@@ -8,12 +8,15 @@ from html import escape
 
 # --- Utilidades ---
 def format_timedelta(td):
+    """Formatea un timedelta a HH:MM:SS"""
     total_seconds = int(td.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
+
 def inject_timer_script(start_timestamp):
+    """Inyecta JavaScript para cronómetro en tiempo real"""
     timer_html = f"""
     <div id="timer-container" style="font-size: 2rem; font-weight: 600; color: white; text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%); border-radius: 16px; box-shadow: 0 8px 16px rgba(74, 144, 226, 0.3);">
         <div style="font-size: 0.85rem; font-weight: 400; opacity: 0.95; margin-bottom: 0.5rem; letter-spacing: 0.5px;">TIEMPO TRANSCURRIDO</div>
@@ -38,10 +41,40 @@ def inject_timer_script(start_timestamp):
     """
     return timer_html
 
+
+def ensure_datetime(dt_value):
+    """
+    Convierte un valor a datetime si no lo es ya.
+    Maneja: str, pd.Timestamp, datetime
+    """
+    if dt_value is None:
+        return None
+    
+    if isinstance(dt_value, datetime):
+        return dt_value
+    
+    if isinstance(dt_value, str):
+        return pd.to_datetime(dt_value).to_pydatetime()
+    
+    if isinstance(dt_value, pd.Timestamp):
+        return dt_value.to_pydatetime()
+    
+    # Intento genérico
+    try:
+        return pd.to_datetime(dt_value).to_pydatetime()
+    except:
+        return None
+
+
 def check_and_close_day(conn, user_id):
+    """Cierra automáticamente actividades del día anterior si cambia la fecha"""
     now = datetime.now()
     if st.session_state.get('current_registro_id'):
         current_start = st.session_state.get('current_start_time')
+        
+        # Asegurar que current_start sea datetime
+        current_start = ensure_datetime(current_start)
+        
         if current_start and current_start.date() < now.date():
             end_of_previous_day = datetime.combine(current_start.date(), dt_time(23, 59, 59))
             try:
@@ -56,37 +89,52 @@ def check_and_close_day(conn, user_id):
             except Exception as e:
                 st.error(f"Error al cerrar jornada anterior: {e}")
 
+
 def restore_open_activity(conn, user_id, date):
+    """
+    Restaura actividad abierta desde la BD al iniciar sesión
+    CORREGIDO: Maneja correctamente los tipos de datos
+    """
     if 'activity_restored' not in st.session_state:
         try:
             open_activity = queries.get_open_activity(conn, user_id, date)
             if open_activity is not None and not open_activity.empty:
                 row = open_activity.iloc[0]
-                # Restauramos valores útiles a session_state
-                st.session_state['current_registro_id'] = row['id']
-                st.session_state['current_activity_id'] = row['actividad_id']
-                st.session_state['current_activity_name'] = row['nombre_actividad']
-                st.session_state['current_start_time'] = row['hora_inicio']
-                # row['subactividad'] viene de la query como nombre (si existe)
+                
+                # Asegurar tipos correctos
+                hora_inicio = ensure_datetime(row['hora_inicio'])
+                
+                if hora_inicio is None:
+                    st.warning("⚠️ Error al restaurar actividad: hora de inicio inválida")
+                    st.session_state['activity_restored'] = True
+                    return
+                
+                st.session_state['current_registro_id'] = int(row['id'])
+                st.session_state['current_activity_id'] = int(row['actividad_id'])
+                st.session_state['current_activity_name'] = str(row['nombre_actividad'])
+                st.session_state['current_start_time'] = hora_inicio
                 st.session_state['current_subactivity'] = row.get('subactividad', None)
                 st.session_state['current_comment'] = row.get('comentario', None)
+                
                 st.success(f"🔄 Actividad restaurada: {row['nombre_actividad']}")
+            
             st.session_state['activity_restored'] = True
         except Exception as e:
             st.warning(f"No se pudo restaurar actividad: {e}")
             st.session_state['activity_restored'] = True
+
 
 def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, subactivity_id=None, comment=None, subactivity_name=None):
     """
     Inicia o cambia actividad. 
     subactivity_id -> ID que va a la BD
     subactivity_name -> nombre para mostrar en UI (opcional)
+    CORREGIDO: No envía hora de Python, deja que PostgreSQL use CURRENT_TIMESTAMP
     """
-    now = datetime.now()
     # Si existe actividad en curso, la cerramos
     if st.session_state.get('current_registro_id'):
         try:
-            queries.stop_activity(conn, st.session_state['current_registro_id'], now)
+            queries.stop_activity(conn, st.session_state['current_registro_id'], None)
         except Exception as e:
             st.session_state['last_error'] = f"Error al detener actividad: {str(e)}"
             return
@@ -94,8 +142,10 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, sub
     # Si la nueva actividad es Salida, iniciamos y cerramos inmediatamente
     if new_activity_name == 'Salida':
         try:
-            reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity_id, comment)
-            queries.stop_activity(conn, reg_id, now)
+            reg_id = queries.start_activity(conn, user_id, new_activity_id, None, subactivity_id, comment)
+            if reg_id:
+                queries.stop_activity(conn, reg_id, None)
+            
             st.session_state['current_activity_id'] = None
             st.session_state['current_activity_name'] = "Jornada Finalizada"
             st.session_state['current_start_time'] = None
@@ -109,21 +159,30 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, sub
             st.session_state['last_error'] = f"Error al marcar salida: {str(e)}"
             return
     else:
-        # Iniciamos nueva actividad (dejar en BD la hora de inicio)
+        # Iniciamos nueva actividad
         try:
-            new_reg_id = queries.start_activity(conn, user_id, new_activity_id, now, subactivity_id, comment)
+            new_reg_id = queries.start_activity(conn, user_id, new_activity_id, None, subactivity_id, comment)
+            
+            if new_reg_id is None:
+                st.session_state['last_error'] = "Error: No se pudo crear el registro de actividad"
+                return
+            
+            # Guardamos hora actual de Python SOLO para el cronómetro local
+            # La BD tiene la hora correcta desde CURRENT_TIMESTAMP
             st.session_state['current_activity_id'] = new_activity_id
             st.session_state['current_activity_name'] = new_activity_name
-            st.session_state['current_start_time'] = now
+            st.session_state['current_start_time'] = datetime.now()  # Solo para UI
             st.session_state['current_registro_id'] = new_reg_id
-            # Guardamos nombre legible de subactividad si se entregó
+            
+            # Guardamos nombre legible de subactividad
             if subactivity_name:
                 st.session_state['current_subactivity'] = subactivity_name
             else:
-                # si solo se pasó id, dejamos como estaba o None
                 st.session_state['current_subactivity'] = st.session_state.get('current_subactivity', None)
+            
             st.session_state['current_comment'] = comment
-            subact_text = f" - {subactivity_name}" if subactivity_name else (f" - {subactivity_id}" if subactivity_id else "")
+            
+            subact_text = f" - {subactivity_name}" if subactivity_name else (f" - ID:{subactivity_id}" if subactivity_id else "")
             st.session_state['last_success'] = f"✅ Actividad iniciada: {new_activity_name}{subact_text}"
             st.session_state.pop('last_error', None)
             st.session_state.pop('show_subactivity_modal', None)
@@ -131,17 +190,19 @@ def handle_activity_click(conn, user_id, new_activity_id, new_activity_name, sub
             st.session_state['last_error'] = f"Error al iniciar actividad: {str(e)}"
             return
 
-    # Limpiar caches que dependan de datos
+    # Limpiar caches
     try:
         st.cache_data.clear()
     except:
         pass
 
+
 def get_activity_color(activity_name):
+    """Retorna color para visualización de actividades"""
     colors = {
         'Ingreso': '#E0E0E0',
         'Seguimiento': '#C8E6C9',
-        'Bandeja de correo': '#BBDEFB',
+        'Bandeja de Correo': '#BBDEFB',  # CORREGIDO: Con mayúscula
         'Reportes': '#FFE0B2',
         'Break Salida': '#B2EBF2',
         'Regreso Break': '#B2EBF2',
@@ -152,9 +213,12 @@ def get_activity_color(activity_name):
     }
     return colors.get(activity_name, '#F5F5F5')
 
+
 def show_subactivity_modal(conn, activity_id, activity_name):
-    """Muestra modal con selector de subactividad desde BD y campo de comentario
-       Devuelve (subactivity_id, subactivity_name, full_comment)
+    """
+    Muestra modal con selector de subactividad desde BD y campo de comentario
+    Devuelve (subactivity_id, subactivity_name, full_comment)
+    CORREGIDO: Maneja correctamente errores de carga
     """
     st.markdown("---")
     st.markdown(f"### 📋 Detalles de {activity_name}")
@@ -223,11 +287,16 @@ def show_subactivity_modal(conn, activity_id, activity_name):
     
     return selected_subactivity_id, selected_subactivity_name, (full_comment if full_comment else None)
 
+
 def show_asesor_dashboard(conn):
+    """
+    Dashboard principal del asesor
+    CORREGIDO: Manejo robusto de tipos de datos y errores
+    """
     user = st.session_state['user_info']
     user_id = user['id']
     
-    # Definir la fecha "de hoy" (según el servidor de Streamlit)
+    # Fecha actual
     today_date = datetime.now().date()
 
     # Restaurar actividad abierta al cargar
@@ -236,7 +305,7 @@ def show_asesor_dashboard(conn):
     # Verificar y cerrar día si cambió
     check_and_close_day(conn, user_id)
     
-    # CSS personalizado con azul corporativo (incluye ocultar "Manage app" si aparece)
+    # CSS personalizado
     st.markdown("""
     <style>
         .block-container { padding-top: 2rem; }
@@ -300,14 +369,21 @@ def show_asesor_dashboard(conn):
         full_activity = f"{activity_display}"
         if subactivity_display:
             full_activity += f" • {subactivity_display}"
-        st.markdown(f'<div class="current-activity-badge">📍 {full_activity}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="current-activity-badge">🔵 {full_activity}</div>', unsafe_allow_html=True)
     else:
-        st.info(f"📍 {activity_display}")
+        st.info(f"🔵 {activity_display}")
     
     # Cronómetro
-    if st.session_state.get('current_start_time'):
-        start_timestamp = int(st.session_state['current_start_time'].timestamp() * 1000)
-        html(inject_timer_script(start_timestamp), height=110)
+    current_start = st.session_state.get('current_start_time')
+    if current_start:
+        # Asegurar que sea datetime
+        current_start = ensure_datetime(current_start)
+        
+        if current_start:
+            start_timestamp = int(current_start.timestamp() * 1000)
+            html(inject_timer_script(start_timestamp), height=110)
+        else:
+            st.warning("⚠️ Error en cronómetro: hora de inicio inválida")
     else:
         st.markdown("""
         <div style="padding: 2rem; text-align: center; background: linear-gradient(135deg, #E8F4F8 0%, #D6EAF8 100%); 
@@ -328,8 +404,7 @@ def show_asesor_dashboard(conn):
             
             col1, col2, col3 = st.columns([1, 1, 2])
             
-            if col1.button("✅ Confirmar", type="primary", width='stretch'):
-                # Pasamos both id y name (si name es None se pasa None)
+            if col1.button("✅ Confirmar", type="primary", use_container_width=True):
                 handle_activity_click(
                     conn, 
                     user['id'], 
@@ -339,12 +414,11 @@ def show_asesor_dashboard(conn):
                     comment,
                     subactivity_name
                 )
-                # limpiamos modal pending y recargamos
                 st.session_state.pop('show_subactivity_modal', None)
                 st.session_state.pop('pending_activity', None)
                 st.rerun()
             
-            if col2.button("❌ Cancelar", width='stretch'):
+            if col2.button("❌ Cancelar", use_container_width=True):
                 st.session_state.pop('show_subactivity_modal', None)
                 st.session_state.pop('pending_activity', None)
                 st.rerun()
@@ -364,8 +438,8 @@ def show_asesor_dashboard(conn):
     
     cols = st.columns(4)
     
-    # Verificar si necesita modal de detalles
-    activities_with_details = ['Seguimiento', 'Bandeja de correo', 'Reportes', 'Auxiliares']
+    # CORREGIDO: Nombres exactos como en la BD
+    activities_with_details = ['Seguimiento', 'Bandeja de Correo', 'Reportes', 'Auxiliares']
 
     for index, row in activities_df.iterrows():
         col = cols[index % 4]
@@ -378,19 +452,22 @@ def show_asesor_dashboard(conn):
         )
         
         emoji_map = {
+            'Ingreso': '🟢',
             'Seguimiento': '📞',
-            'Bandeja de correo': '📧',
+            'Bandeja de Correo': '📧',
             'Reportes': '📊',
-            'Pausa': '☕',
+            'Break Salida': '☕',
+            'Regreso Break': '🔙',
             'Auxiliares': '🔧',
             'Reunión': '👥',
+            'Incidencia': '⚠️',
             'Salida': '🚪'
         }
         emoji = emoji_map.get(activity_name, '📌')
         
         if col.button(f"{emoji} {activity_name}", 
                      key=f"btn_{activity_id}", 
-                     width='stretch', 
+                     use_container_width=True, 
                      disabled=disabled,
                      type="primary"):
             
@@ -409,7 +486,6 @@ def show_asesor_dashboard(conn):
     st.markdown('<div class="section-title">📊 Resumen del día</div>', unsafe_allow_html=True)
     
     try:
-        # Pasa 'today_date' como argumento
         summary_df = queries.get_today_summary(conn, user_id, today_date)
         
         if not summary_df.empty:
@@ -445,7 +521,7 @@ def show_asesor_dashboard(conn):
             
             st.dataframe(
                 display_df,
-                width='stretch',
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "Actividad": st.column_config.TextColumn("Actividad", width="medium"),
@@ -456,7 +532,7 @@ def show_asesor_dashboard(conn):
             
             st.markdown("---")
             
-            # Gráfico de barras (solo nombres sin modificación manual)
+            # Gráfico de barras
             st.markdown("**Distribución de Tiempo**")
             
             chart_df = summary_df.copy()
@@ -466,38 +542,36 @@ def show_asesor_dashboard(conn):
             st.bar_chart(
                 chart_df,
                 height=280,
-                width='stretch'
+                use_container_width=True
             )
             
         else:
-            st.info("📭 Aún no hay actividades completadas hoy.")
+            st.info("🔭 Aún no hay actividades completadas hoy.")
     except Exception as e:
         st.warning(f"No se pudo cargar el resumen: {e}")
 
     # Línea de tiempo (Histórico detallado)
     st.markdown('<div class="section-title">🕐 Histórico de Actividades</div>', unsafe_allow_html=True)
     try:
-        # Pasa 'today_date' como argumento
         log_df = queries.get_today_log(conn, user_id, today_date)
         
-        # Si hay actividad en curso, la agregamos visualmente al log (sin depender de que la BD la haya cerrado)
+        # Si hay actividad en curso, agregarla visualmente
         if (log_df is None) or (hasattr(log_df, "empty") and log_df.empty):
             log_df = pd.DataFrame(columns=['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion'])
 
         if st.session_state.get('current_registro_id'):
-            # Construir fila para la actividad en curso con formato igual al query
             cur_name = st.session_state.get('current_activity_name', 'N/A')
             cur_sub = st.session_state.get('current_subactivity', None) or '-'
             cur_comment = st.session_state.get('current_comment', None) or '-'
-            cur_inicio = st.session_state.get('current_start_time')
-            # Duración calculada en tiempo real
+            cur_inicio = ensure_datetime(st.session_state.get('current_start_time'))
+            
             if cur_inicio:
                 cur_dur = format_timedelta(datetime.now() - cur_inicio)
-                # Para la columna "inicio" imitar formato 'HH24:MI' usado en la query
                 inicio_str = cur_inicio.strftime("%H:%M")
             else:
                 cur_dur = 'En curso'
                 inicio_str = '-'
+            
             current_row = pd.DataFrame([{
                 'nombre_actividad': cur_name,
                 'subactividad': cur_sub,
@@ -505,29 +579,24 @@ def show_asesor_dashboard(conn):
                 'inicio': inicio_str,
                 'duracion': cur_dur
             }])
-            # Concatenamos al dataframe existente (dejar al inicio para verse primero)
             log_df = pd.concat([current_row, log_df], ignore_index=True)
 
         if not log_df.empty:
-            # Tabla detallada con toda la información
+            # Tabla detallada
             st.markdown("**Registro completo del día**")
             
-            # Crear DataFrame para mostrar (copiar y renombrar columnas)
             display_log = log_df.copy()
-            # Asegurarnos que las columnas existan
             for c in ['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion']:
                 if c not in display_log.columns:
                     display_log[c] = '-'
             
             display_log = display_log[['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion']]
             display_log.columns = ['Actividad', 'Subactividad', 'Comentario', 'Hora Inicio', 'Duración']
-            
-            # Reemplazar valores None con "-"
             display_log = display_log.fillna('-')
             
             st.dataframe(
                 display_log,
-                width='stretch',
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "Actividad": st.column_config.TextColumn("📋 Actividad", width="medium"),
@@ -540,7 +609,7 @@ def show_asesor_dashboard(conn):
             
             st.markdown("---")
             
-            # Timeline visual (más visual)
+            # Timeline visual
             st.markdown("**Línea de Tiempo Visual**")
 
             for _, row in log_df.iterrows():
@@ -552,12 +621,15 @@ def show_asesor_dashboard(conn):
                 color = get_activity_color(activity_name)
                 
                 emoji_map = {
+                    'Ingreso': '🟢',
                     'Seguimiento': '📞',
-                    'Bandeja de correo': '📧',
+                    'Bandeja de Correo': '📧',
                     'Reportes': '📊',
-                    'Pausa': '☕',
+                    'Break Salida': '☕',
+                    'Regreso Break': '🔙',
                     'Auxiliares': '🔧',
                     'Reunión': '👥',
+                    'Incidencia': '⚠️',
                     'Salida': '🚪'
                 }
                 emoji = emoji_map.get(activity_name, '📌')
@@ -571,7 +643,7 @@ def show_asesor_dashboard(conn):
                 timeline_html = f"""
                 <div class="timeline-item" style="background-color: {color};">
                     <div style="flex: 1;">
-                        <div class="timeline-activity">{emoji} {activity_name} <span style="color: #6B7280; font-size: 0.85rem;">• {inicio_str}</span></div>
+                        <div class="timeline-activity">{emoji} {escape(activity_name)} <span style="color: #6B7280; font-size: 0.85rem;">• {escape(inicio_str)}</span></div>
                 """
                 
                 if subactivity and subactivity != '-':
@@ -588,6 +660,6 @@ def show_asesor_dashboard(conn):
                 
                 st.markdown(timeline_html, unsafe_allow_html=True)
         else:
-            st.info("📭 Sin registros hoy.")
+            st.info("🔭 Sin registros hoy.")
     except Exception as e:
         st.warning(f"No se pudo cargar el histórico: {e}")
