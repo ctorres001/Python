@@ -1,4 +1,4 @@
-# asesor_view.py (versión corregida y optimizada)
+# views/asesor_view.py (versión final corregida y completa)
 import streamlit as st
 from core import queries
 from datetime import datetime, time as dt_time
@@ -15,15 +15,22 @@ def format_timedelta(td):
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 
-def inject_timer_script(start_timestamp):
-    """Inyecta JavaScript para cronómetro en tiempo real"""
+def inject_timer_script(start_timestamp, sync_offset_seconds=0):
+    """
+    Inyecta JavaScript para cronómetro en tiempo real
+    start_timestamp: timestamp en milisegundos
+    sync_offset_seconds: ajuste de sincronización con BD (en segundos)
+    """
     timer_html = f"""
     <div id="timer-container" style="font-size: 2rem; font-weight: 600; color: white; text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%); border-radius: 16px; box-shadow: 0 8px 16px rgba(74, 144, 226, 0.3);">
         <div style="font-size: 0.85rem; font-weight: 400; opacity: 0.95; margin-bottom: 0.5rem; letter-spacing: 0.5px;">TIEMPO TRANSCURRIDO</div>
         <div id="timer-display" style="font-size: 2.5rem; font-weight: 700; letter-spacing: 2px;">00:00:00</div>
+        <div id="sync-indicator" style="font-size: 0.7rem; opacity: 0.7; margin-top: 0.5rem;">🔄 Sincronizado</div>
     </div>
     <script>
-        const startTime = {start_timestamp};
+        // Ajustar hora de inicio con offset de sincronización
+        const startTime = {start_timestamp} - ({sync_offset_seconds} * 1000);
+        
         function updateTimer() {{
             const now = Date.now();
             const elapsed = Math.floor((now - startTime) / 1000);
@@ -35,8 +42,15 @@ def inject_timer_script(start_timestamp):
                             String(seconds).padStart(2, '0');
             document.getElementById('timer-display').textContent = display;
         }}
+        
         updateTimer();
         setInterval(updateTimer, 1000);
+        
+        // Actualizar indicador de sincronización
+        setTimeout(function() {{
+            document.getElementById('sync-indicator').textContent = '⏱️ Actualiza para re-sincronizar';
+            document.getElementById('sync-indicator').style.opacity = '0.5';
+        }}, 300000); // Después de 5 minutos
     </script>
     """
     return timer_html
@@ -202,7 +216,7 @@ def get_activity_color(activity_name):
     colors = {
         'Ingreso': '#E0E0E0',
         'Seguimiento': '#C8E6C9',
-        'Bandeja de Correo': '#BBDEFB',  # CORREGIDO: Con mayúscula
+        'Bandeja de Correo': '#BBDEFB',
         'Reportes': '#FFE0B2',
         'Break Salida': '#B2EBF2',
         'Regreso Break': '#B2EBF2',
@@ -374,16 +388,41 @@ def show_asesor_dashboard(conn):
         st.info(f"🔵 {activity_display}")
     
     # Cronómetro
-    current_start = st.session_state.get('current_start_time')
-    if current_start:
-        # Asegurar que sea datetime
-        current_start = ensure_datetime(current_start)
-        
-        if current_start:
-            start_timestamp = int(current_start.timestamp() * 1000)
-            html(inject_timer_script(start_timestamp), height=110)
-        else:
-            st.warning("⚠️ Error en cronómetro: hora de inicio inválida")
+    if st.session_state.get('current_registro_id'):
+        try:
+            # Obtener tiempo REAL desde la BD para sincronizar
+            sync_query = conn.query(
+                """
+                SELECT 
+                    hora_inicio,
+                    EXTRACT(EPOCH FROM (
+                        CURRENT_TIMESTAMP - 
+                        (hora_inicio AT TIME ZONE 'America/Lima')
+                    )) as segundos_bd
+                FROM registro_actividades
+                WHERE id = :id
+                """,
+                params={"id": st.session_state['current_registro_id']},
+                ttl=0
+            )
+            
+            if not sync_query.empty:
+                segundos_bd = int(sync_query.iloc[0]['segundos_bd'])
+                
+                # Usar hora actual de Python para el cronómetro JavaScript
+                now_local = datetime.now()
+                start_timestamp = int(now_local.timestamp() * 1000)
+                
+                # Calcular offset para sincronizar con BD
+                # El cronómetro JS sumará desde "ahora - offset"
+                sync_offset = segundos_bd
+                
+                # Inyectar cronómetro sincronizado
+                html(inject_timer_script(start_timestamp, sync_offset), height=130)
+            else:
+                st.warning("⚠️ No se pudo sincronizar el cronómetro")
+        except Exception as e:
+            st.warning(f"⚠️ Error al sincronizar: {e}")
     else:
         st.markdown("""
         <div style="padding: 2rem; text-align: center; background: linear-gradient(135deg, #E8F4F8 0%, #D6EAF8 100%); 
@@ -438,7 +477,7 @@ def show_asesor_dashboard(conn):
     
     cols = st.columns(4)
     
-    # CORREGIDO: Nombres exactos como en la BD
+    # Nombres exactos como en la BD
     activities_with_details = ['Seguimiento', 'Bandeja de Correo', 'Reportes', 'Auxiliares']
 
     for index, row in activities_df.iterrows():
@@ -555,31 +594,9 @@ def show_asesor_dashboard(conn):
     try:
         log_df = queries.get_today_log(conn, user_id, today_date)
         
-        # Si hay actividad en curso, agregarla visualmente
+        # NO agregar manualmente la actividad en curso, ya viene en la query
         if (log_df is None) or (hasattr(log_df, "empty") and log_df.empty):
             log_df = pd.DataFrame(columns=['nombre_actividad', 'subactividad', 'comentario', 'inicio', 'duracion'])
-
-        if st.session_state.get('current_registro_id'):
-            cur_name = st.session_state.get('current_activity_name', 'N/A')
-            cur_sub = st.session_state.get('current_subactivity', None) or '-'
-            cur_comment = st.session_state.get('current_comment', None) or '-'
-            cur_inicio = ensure_datetime(st.session_state.get('current_start_time'))
-            
-            if cur_inicio:
-                cur_dur = format_timedelta(datetime.now() - cur_inicio)
-                inicio_str = cur_inicio.strftime("%H:%M")
-            else:
-                cur_dur = 'En curso'
-                inicio_str = '-'
-            
-            current_row = pd.DataFrame([{
-                'nombre_actividad': cur_name,
-                'subactividad': cur_sub,
-                'comentario': cur_comment,
-                'inicio': inicio_str,
-                'duracion': cur_dur
-            }])
-            log_df = pd.concat([current_row, log_df], ignore_index=True)
 
         if not log_df.empty:
             # Tabla detallada
@@ -640,11 +657,8 @@ def show_asesor_dashboard(conn):
                 if comment and comment != '-':
                     display_comment = escape(comment if len(comment) <= 120 else comment[:117] + "...")
                 
-                timeline_html = f"""
-                <div class="timeline-item" style="background-color: {color};">
-                    <div style="flex: 1;">
-                        <div class="timeline-activity">{emoji} {escape(activity_name)} <span style="color: #6B7280; font-size: 0.85rem;">• {escape(inicio_str)}</span></div>
-                """
+                # Construir HTML en una sola línea limpia
+                timeline_html = f'<div class="timeline-item" style="background-color: {color};"><div style="flex: 1;"><div class="timeline-activity">{emoji} {escape(activity_name)} <span style="color: #6B7280; font-size: 0.85rem;">• {escape(inicio_str)}</span></div>'
                 
                 if subactivity and subactivity != '-':
                     timeline_html += f'<div class="timeline-subactivity">→ {escape(str(subactivity))}</div>'
@@ -652,12 +666,9 @@ def show_asesor_dashboard(conn):
                 if display_comment:
                     timeline_html += f'<div class="timeline-comment">{display_comment}</div>'
                 
-                timeline_html += f"""
-                    </div>
-                    <div class="timeline-time">{escape(str(duration))}</div>
-                </div>
-                """
+                timeline_html += f'</div><div class="timeline-time">{escape(str(duration))}</div></div>'
                 
+                # Renderizar HTML
                 st.markdown(timeline_html, unsafe_allow_html=True)
         else:
             st.info("🔭 Sin registros hoy.")
