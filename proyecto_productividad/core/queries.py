@@ -214,7 +214,7 @@ def get_today_summary(conn, user_id, date):
     """
     Resumen del día con totales por actividad (incluye actividades en curso sumando NOW()).
     Retorna DataFrame con columnas: nombre_actividad, total_segundos
-    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
+    CORREGIDO: Fuerza timezone en cálculos para evitar problemas de offset
     """
     df = conn.query(
         """
@@ -223,7 +223,10 @@ def get_today_summary(conn, user_id, date):
             SUM(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (
+                            CURRENT_TIMESTAMP - 
+                            (r.hora_inicio AT TIME ZONE 'America/Lima')
+                        ))
                     ELSE 
                         COALESCE(r.duracion_seg, 0)
                 END
@@ -274,7 +277,7 @@ def get_activity_stats(conn, user_id, start_date, end_date):
     """
     Estadísticas por actividad/subactividad en rango de fechas.
     Devuelve: nombre_actividad, subactividad, cantidad_registros, total_horas, promedio_minutos
-    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
+    CORREGIDO: Fuerza timezone en cálculos
     """
     df = conn.query(
         """
@@ -285,7 +288,10 @@ def get_activity_stats(conn, user_id, start_date, end_date):
             SUM(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (
+                            CURRENT_TIMESTAMP - 
+                            (r.hora_inicio AT TIME ZONE 'America/Lima')
+                        ))
                     ELSE 
                         COALESCE(r.duracion_seg, 0)
                 END
@@ -293,7 +299,10 @@ def get_activity_stats(conn, user_id, start_date, end_date):
             AVG(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (
+                            CURRENT_TIMESTAMP - 
+                            (r.hora_inicio AT TIME ZONE 'America/Lima')
+                        ))
                     ELSE 
                         COALESCE(r.duracion_seg, 0)
                 END
@@ -316,7 +325,7 @@ def get_user_productivity_summary(conn, user_id, date):
     """
     Resumen de productividad del usuario en una fecha.
     Retorna: total_actividades, tipos_actividad, primera_actividad, ultima_actividad, horas_trabajadas
-    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
+    CORREGIDO: Fuerza timezone en cálculos
     """
     df = conn.query(
         """
@@ -328,7 +337,10 @@ def get_user_productivity_summary(conn, user_id, date):
             SUM(
                 CASE 
                     WHEN hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - hora_inicio))
+                        EXTRACT(EPOCH FROM (
+                            CURRENT_TIMESTAMP - 
+                            (hora_inicio AT TIME ZONE 'America/Lima')
+                        ))
                     ELSE 
                         COALESCE(duracion_seg, 0)
                 END
@@ -351,7 +363,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
     """
     Dashboard de supervisor para una campaña y fecha dada.
     Devuelve: nombre_completo, ingreso, salida, tiempo_total_jornada, tiempo_efectivo, estado_actual
-    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
+    CORREGIDO: Fuerza timezone en cálculos
     """
     df = conn.query(
         """
@@ -370,7 +382,10 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
                 SUM(
                     CASE 
                         WHEN r.hora_fin IS NULL THEN 
-                            EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
+                            EXTRACT(EPOCH FROM (
+                                CURRENT_TIMESTAMP - 
+                                (r.hora_inicio AT TIME ZONE 'America/Lima')
+                            ))
                         ELSE 
                             COALESCE(r.duracion_seg, 0)
                     END
@@ -413,7 +428,7 @@ def get_supervisor_dashboard(conn, campaña_id, fecha):
 def get_team_activity_breakdown(conn, campaña_id, fecha):
     """
     Desglose de actividades por asesor dentro de una campaña en una fecha.
-    CORREGIDO: Usa CURRENT_TIMESTAMP para evitar problemas de timezone
+    CORREGIDO: Fuerza timezone en cálculos
     """
     df = conn.query(
         """
@@ -425,7 +440,10 @@ def get_team_activity_breakdown(conn, campaña_id, fecha):
             SUM(
                 CASE 
                     WHEN r.hora_fin IS NULL THEN 
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.hora_inicio))
+                        EXTRACT(EPOCH FROM (
+                            CURRENT_TIMESTAMP - 
+                            (r.hora_inicio AT TIME ZONE 'America/Lima')
+                        ))
                     ELSE 
                         COALESCE(r.duracion_seg, 0)
                 END
