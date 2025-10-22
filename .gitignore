@@ -36,6 +36,7 @@ Node/
 !proyecto_productividad/**/*.py
 !proyecto_productividad/**/*.txt
 !proyecto_productividad/**/*.png
+!proyecto_productividad/**/*.yaml
 !Otros/
 !Otros/**/
 !Otros/**/*.py
