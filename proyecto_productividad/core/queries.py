@@ -214,7 +214,7 @@ def get_today_summary(conn, user_id, date):
     """
     Resumen del día con totales por actividad (incluye actividades en curso sumando NOW()).
     Retorna DataFrame con columnas: nombre_actividad, total_segundos
-    CORREGIDO: Fuerza timezone en cálculos para evitar problemas de offset
+    CORREGIDO: Agrupa correctamente y ordena por tiempo descendente
     """
     df = conn.query(
         """
@@ -239,7 +239,7 @@ def get_today_summary(conn, user_id, date):
         ORDER BY total_segundos DESC
         """,
         params={"user_id": user_id, "date": date},
-        ttl=0
+        ttl=0  # Sin caché para datos en tiempo real
     )
     return df
 
@@ -655,3 +655,320 @@ def validate_connection(conn):
         return True
     except Exception:
         return False
+    
+# ================================
+# === FUNCIONES PARA ADMINISTRADOR ===
+# ================================
+
+# -------------------------------------
+# Dashboard General - Queries de Reportes
+# -------------------------------------
+
+def get_admin_kpis(conn, start_date=None, end_date=None, campaña_id=None):
+    """
+    Obtiene KPIs generales para el dashboard del administrador
+    """
+    where_clauses = []
+    params = {}
+    
+    if start_date and end_date:
+        where_clauses.append("r.fecha BETWEEN :start_date AND :end_date")
+        params["start_date"] = start_date
+        params["end_date"] = end_date
+    
+    if campaña_id:
+        where_clauses.append("u.campaña_id = :campaña_id")
+        params["campaña_id"] = campaña_id
+    
+    where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
+    
+    df = conn.query(
+        f"""
+        SELECT 
+            COUNT(DISTINCT u.id) as total_asesores,
+            COUNT(DISTINCT u.campaña_id) as total_campañas,
+            COUNT(DISTINCT r.id) as total_registros,
+            SUM(COALESCE(r.duracion_seg, 0)) / 3600 as horas_totales,
+            AVG(COALESCE(r.duracion_seg, 0)) / 60 as promedio_minutos
+        FROM usuarios u
+        LEFT JOIN registro_actividades r ON u.id = r.usuario_id
+        WHERE u.rol_id = (SELECT id FROM roles WHERE nombre = 'Asesor')
+        {where_sql}
+        """,
+        params=params,
+        ttl=60
+    )
+    return df
+
+
+def get_admin_dashboard_by_campaign(conn, start_date, end_date):
+    """
+    Resumen de actividades por campaña
+    """
+    df = conn.query(
+        """
+        SELECT 
+            c.nombre as campaña,
+            COUNT(DISTINCT u.id) as total_asesores,
+            COUNT(DISTINCT r.id) as total_registros,
+            SUM(COALESCE(r.duracion_seg, 0)) / 3600 as horas_totales,
+            AVG(COALESCE(r.duracion_seg, 0)) / 60 as promedio_actividad_min
+        FROM campañas c
+        LEFT JOIN usuarios u ON c.id = u.campaña_id 
+            AND u.rol_id = (SELECT id FROM roles WHERE nombre = 'Asesor')
+        LEFT JOIN registro_actividades r ON u.id = r.usuario_id 
+            AND r.fecha BETWEEN :start_date AND :end_date
+        GROUP BY c.nombre
+        ORDER BY horas_totales DESC
+        """,
+        params={"start_date": start_date, "end_date": end_date},
+        ttl=60
+    )
+    return df
+
+
+def get_admin_dashboard_by_asesor(conn, start_date, end_date, campaña_id=None):
+    """
+    Resumen de actividades por asesor
+    """
+    where_clause = ""
+    params = {"start_date": start_date, "end_date": end_date}
+    
+    if campaña_id:
+        where_clause = "AND u.campaña_id = :campaña_id"
+        params["campaña_id"] = campaña_id
+    
+    df = conn.query(
+        f"""
+        SELECT 
+            u.nombre_completo as asesor,
+            c.nombre as campaña,
+            COUNT(DISTINCT DATE(r.hora_inicio)) as dias_trabajados,
+            COUNT(r.id) as total_actividades,
+            SUM(COALESCE(r.duracion_seg, 0)) / 3600 as horas_totales,
+            MIN(DATE(r.hora_inicio)) as primera_actividad,
+            MAX(DATE(r.hora_inicio)) as ultima_actividad
+        FROM usuarios u
+        JOIN campañas c ON u.campaña_id = c.id
+        LEFT JOIN registro_actividades r ON u.id = r.usuario_id 
+            AND r.fecha BETWEEN :start_date AND :end_date
+        WHERE u.rol_id = (SELECT id FROM roles WHERE nombre = 'Asesor')
+        {where_clause}
+        GROUP BY u.nombre_completo, c.nombre
+        ORDER BY horas_totales DESC
+        """,
+        params=params,
+        ttl=60
+    )
+    return df
+
+
+def get_admin_activity_breakdown(conn, start_date, end_date, campaña_id=None):
+    """
+    Desglose de tiempo por tipo de actividad
+    """
+    where_clause = ""
+    params = {"start_date": start_date, "end_date": end_date}
+    
+    if campaña_id:
+        where_clause = "AND u.campaña_id = :campaña_id"
+        params["campaña_id"] = campaña_id
+    
+    df = conn.query(
+        f"""
+        SELECT 
+            a.nombre_actividad,
+            COUNT(r.id) as cantidad,
+            SUM(COALESCE(r.duracion_seg, 0)) / 3600 as horas_totales,
+            AVG(COALESCE(r.duracion_seg, 0)) / 60 as promedio_minutos
+        FROM actividades a
+        LEFT JOIN registro_actividades r ON a.id = r.actividad_id 
+            AND r.fecha BETWEEN :start_date AND :end_date
+        LEFT JOIN usuarios u ON r.usuario_id = u.id
+        WHERE 1=1 {where_clause}
+        GROUP BY a.nombre_actividad
+        ORDER BY horas_totales DESC
+        """,
+        params=params,
+        ttl=60
+    )
+    return df
+
+
+# -------------------------------------
+# Gestión de Campañas
+# -------------------------------------
+
+def get_all_campaigns(conn):
+    """Lista todas las campañas"""
+    return conn.query("SELECT * FROM campañas ORDER BY nombre", ttl=300)
+
+
+def create_campaign(conn, nombre):
+    """Crea una nueva campaña"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO campañas (nombre) VALUES (:nombre)"),
+                {"nombre": nombre}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al crear campaña: {e}")
+
+
+def update_campaign(conn, campaign_id, nombre):
+    """Actualiza una campaña"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE campañas SET nombre = :nombre WHERE id = :id"),
+                {"nombre": nombre, "id": campaign_id}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al actualizar campaña: {e}")
+
+
+def delete_campaign(conn, campaign_id):
+    """Elimina una campaña (verifica que no tenga usuarios)"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            # Verificar si tiene usuarios
+            result = connection.execute(
+                text("SELECT COUNT(*) FROM usuarios WHERE campaña_id = :id"),
+                {"id": campaign_id}
+            )
+            count = result.scalar()
+            
+            if count > 0:
+                raise Exception(f"No se puede eliminar. Hay {count} usuarios asociados a esta campaña.")
+            
+            connection.execute(
+                text("DELETE FROM campañas WHERE id = :id"),
+                {"id": campaign_id}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al eliminar campaña: {e}")
+
+
+# -------------------------------------
+# Gestión de Actividades
+# -------------------------------------
+
+def create_activity(conn, nombre_actividad, descripcion, orden):
+    """Crea una nueva actividad"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    INSERT INTO actividades (nombre_actividad, descripcion, orden, activo)
+                    VALUES (:nombre, :desc, :orden, TRUE)
+                """),
+                {"nombre": nombre_actividad, "desc": descripcion, "orden": orden}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al crear actividad: {e}")
+
+
+def update_activity(conn, activity_id, nombre_actividad, descripcion, orden, activo):
+    """Actualiza una actividad"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    UPDATE actividades 
+                    SET nombre_actividad = :nombre, 
+                        descripcion = :desc, 
+                        orden = :orden, 
+                        activo = :activo
+                    WHERE id = :id
+                """),
+                {"nombre": nombre_actividad, "desc": descripcion, "orden": orden, 
+                 "activo": activo, "id": activity_id}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al actualizar actividad: {e}")
+
+
+def delete_activity(conn, activity_id):
+    """Desactiva una actividad (soft delete)"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE actividades SET activo = FALSE WHERE id = :id"),
+                {"id": activity_id}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al desactivar actividad: {e}")
+
+
+# -------------------------------------
+# Gestión de Roles
+# -------------------------------------
+
+def get_all_roles(conn):
+    """Lista todos los roles"""
+    return conn.query("SELECT * FROM roles ORDER BY nombre", ttl=300)
+
+
+def create_role(conn, nombre):
+    """Crea un nuevo rol"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO roles (nombre) VALUES (:nombre)"),
+                {"nombre": nombre}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al crear rol: {e}")
+
+
+def update_role(conn, role_id, nombre):
+    """Actualiza un rol"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE roles SET nombre = :nombre WHERE id = :id"),
+                {"nombre": nombre, "id": role_id}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al actualizar rol: {e}")
+
+
+def delete_role(conn, role_id):
+    """Elimina un rol (verifica que no tenga usuarios)"""
+    engine = get_engine()
+    try:
+        with engine.begin() as connection:
+            # Verificar si tiene usuarios
+            result = connection.execute(
+                text("SELECT COUNT(*) FROM usuarios WHERE rol_id = :id"),
+                {"id": role_id}
+            )
+            count = result.scalar()
+            
+            if count > 0:
+                raise Exception(f"No se puede eliminar. Hay {count} usuarios con este rol.")
+            
+            connection.execute(
+                text("DELETE FROM roles WHERE id = :id"),
+                {"id": role_id}
+            )
+        return True
+    except Exception as e:
+        raise Exception(f"Error al eliminar rol: {e}")

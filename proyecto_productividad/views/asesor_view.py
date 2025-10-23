@@ -544,15 +544,26 @@ def show_asesor_dashboard(conn):
             st.markdown("---")
             
             # Tabla consolidada
+            # Tabla consolidada
             st.markdown("**Consolidado por Actividad**")
             
             # Formatear datos para mostrar
             display_df = summary_df.copy()
+            
+            # IMPORTANTE: Asegurar que está agrupado (por si acaso)
+            display_df = display_df.groupby('nombre_actividad', as_index=False).agg({'total_segundos': 'sum'})
+            
             display_df['Tiempo'] = display_df['total_segundos'].apply(
                 lambda x: f"{int(x//3600):02d}:{int((x%3600)//60):02d}:{int(x%60):02d}"
             )
-            display_df['Porcentaje'] = (display_df['total_segundos'] / total_segundos * 100).round(1)
+            
+            # Recalcular porcentajes después de agrupar
+            total_segundos_agrupado = display_df['total_segundos'].sum()
+            display_df['Porcentaje'] = (display_df['total_segundos'] / total_segundos_agrupado * 100).round(1)
             display_df['Porcentaje'] = display_df['Porcentaje'].apply(lambda x: f"{x}%")
+            
+            # Ordenar por tiempo descendente
+            display_df = display_df.sort_values('total_segundos', ascending=False)
             
             # Mostrar solo columnas relevantes
             display_df = display_df[['nombre_actividad', 'Tiempo', 'Porcentaje']]
@@ -611,10 +622,14 @@ def show_asesor_dashboard(conn):
             display_log.columns = ['Actividad', 'Subactividad', 'Comentario', 'Hora Inicio', 'Duración']
             display_log = display_log.fillna('-')
             
+            # Mostrar contador de registros
+            st.caption(f"Total de registros: {len(display_log)}")
+            
             st.dataframe(
                 display_log,
                 use_container_width=True,
                 hide_index=True,
+                height=400,  # Altura fija con scroll para ver todos
                 column_config={
                     "Actividad": st.column_config.TextColumn("📋 Actividad", width="medium"),
                     "Subactividad": st.column_config.TextColumn("📌 Tipo", width="medium"),
