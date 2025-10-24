@@ -1,5 +1,5 @@
 # ============================================
-# views/login_view.py - Versión Corregida
+# views/login_view.py - Versión Final
 # ============================================
 import streamlit as st
 import os
@@ -31,44 +31,28 @@ def show_login_view():
 
         /* Ocultar elementos nativos de Streamlit */
         header, footer, [data-testid="stSidebar"], [data-testid="stHeader"] {
-            display: none !important;
-        }
-
-        /* Ocultar toolbar y botones de Streamlit */
-        [data-testid="stToolbar"],
-        [data-testid="stDecoration"],
-        [data-testid="stStatusWidget"],
-        .stDeployButton,
-        button[kind="header"] {
-            display: none !important;
+            display: none;
         }
 
         /* Contenedor principal */
         [data-testid="block-container"] {
-            padding: 0 !important;
-            max-width: 100% !important;
-        }
-
-        /* Ocultar todo el contenido por defecto (evita duplicación) */
-        [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
-            display: none;
-        }
-
-        /* Mostrar solo el contenedor del login */
-        .login-wrapper {
-            display: flex !important;
+            display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
+            padding-top: 60px;
             min-height: 100vh;
-            padding: 2rem;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         }
 
-        /* Logo y título */
-        .login-header {
+        /* Tarjeta de login */
+        .login-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            width: 100%;
+            max-width: 320px;
             text-align: center;
-            margin-bottom: 2rem;
         }
 
         .logo-img {
@@ -78,140 +62,99 @@ def show_login_view():
         }
 
         .login-title {
-            font-size: 1.8rem;
+            font-size: 1.5rem;
             font-weight: bold;
             color: #1f2937;
-            margin-top: 1rem;
+            margin-bottom: 1.5rem;
         }
 
-        /* Tarjeta de login */
-        .login-card {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-            padding: 2.5rem;
-            width: 100%;
-            max-width: 400px;
+        /* Inputs y botón */
+        .stTextInput, .stButton {
+            width: 100% !important;
+            max-width: 280px !important;
+            margin: 0 auto 1rem auto !important;
         }
 
-        /* Hacer visibles los inputs del formulario */
-        .login-card [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
-            display: block !important;
-        }
-
-        /* Estilo de inputs */
-        .stTextInput > div > div > input {
-            border-radius: 8px;
-            border: 2px solid #e5e7eb;
-            padding: 0.75rem;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-        }
-
-        .stTextInput > div > div > input:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        /* Botón de login */
         .stButton > button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
             border: none;
-            border-radius: 10px;
-            padding: 0.875rem 2rem;
+            border-radius: 8px;
+            padding: 0.75rem;
             font-weight: 600;
-            font-size: 1rem;
             cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-            margin-top: 1rem;
+            transition: 0.3s ease;
         }
 
         .stButton > button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
-        }
-
-        /* Labels */
-        .stTextInput > label {
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 0.5rem;
-        }
-
-        /* Footer */
-        .login-footer {
-            text-align: center;
-            margin-top: 2rem;
-            color: #6b7280;
-            font-size: 0.875rem;
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.3);
         }
     </style>
     """, unsafe_allow_html=True)
 
+
     # --- Obtener imagen en base64 ---
     logo_path = os.path.join("assets", "ibr_logo.png")
     logo_base64 = get_image_as_base64(logo_path)
+    logo_img = ""
     
     if logo_base64:
-        logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="iBR" class="logo-img">'
+        logo_img = f'<img src="data:image/png;base64,{logo_base64}" alt="iBR" class="logo-img">'
     else:
-        logo_html = '<div style="font-size:3rem;font-weight:700;color:#667eea;">iBR</div>'
+        logo_img = '<div style="font-size:2rem;font-weight:700;color:#667eea;margin-bottom:1.5rem;">iBR</div>'
 
-    # --- Estructura del login ---
-    st.markdown(f"""
-    <div class="login-wrapper">
-        <div class="login-header">
-            {logo_html}
-            <div class="login-title">Registro de Actividades</div>
+    # --- HTML de la tarjeta de login COMPACTA Y CENTRADA ---
+    st.markdown(
+        f"""
+        <div style="display: flex; flex-direction: column; align-items: center; padding-top: 80px;">
+            {logo_img}
+            <div style="font-size: 28px; font-weight: bold; margin-top: 20px;">Registro de Actividades</div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True
+    )
 
-    # --- Formulario en tarjeta ---
-    with st.container():
-        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+    # --- Formulario de login COMPACTO Y CENTRADO ---
+    with st.form("login_form", clear_on_submit=True):
         
-        with st.form("login_form", clear_on_submit=True):
-            username = st.text_input(
-                "Usuario",
-                placeholder="Ingresa tu usuario",
-                key="login_username"
-            )
+        # Contenedor compacto con ESPACIO ADICIONAL
+        st.markdown('<div class="form-compact-container">', unsafe_allow_html=True)
+        
+        username = st.text_input(
+            "Usuario",
+            placeholder="Ingresa tu usuario",
+            autocomplete="off"
+        )
 
-            password = st.text_input(
-                "Contraseña", 
-                type="password",
-                placeholder="Ingresa tu contraseña",
-                key="login_password"
-            )
-            
-            submitted = st.form_submit_button("Ingresar", use_container_width=True)
-
-            if submitted:
-                if not username or not password:
-                    st.warning("⚠️ Por favor, ingresa usuario y contraseña.")
-                else:
-                    with st.spinner("Verificando credenciales..."):
-                        conn = get_db_connection()
-                        if not conn:
-                            st.error("❌ Error al conectar con la base de datos.")
-                        else:
-                            user_data = auth.authenticate_user(conn, username, password)
-
-                            if user_data:
-                                auth.login_user(user_data)
-                                st.success(f"✅ ¡Bienvenido(a), {user_data['nombre_completo']}!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Usuario o contraseña incorrectos.")
+        password = st.text_input(
+            "Contraseña", 
+            type="password",
+            placeholder="Ingresa tu contraseña", 
+            autocomplete="off"
+        )
         
         st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Footer
-    st.markdown("""
-    <div class="login-footer">
-        <p>© 2025 iBR - Sistema de Control de Actividades</p>
-    </div>
-    """, unsafe_allow_html=True)
+        
+        # Botón centrado
+        submitted = st.form_submit_button("Ingresar", width='content')
+
+        if submitted:
+            if not username or not password:
+                st.warning("⚠️ Por favor, ingresa usuario y contraseña.")
+            else:
+                # AGREGAR ESTO: Ocultar el spinner de las queries
+                with st.spinner("Verificando credenciales..."):
+                    conn = get_db_connection()
+                    if not conn:
+                        st.error("❌ Error al conectar con la base de datos.")
+                    else:
+                        user_data = auth.authenticate_user(conn, username, password)
+                        
+                        if user_data:
+                            auth.login_user(user_data)
+                            st.success(f"✅ ¡Bienvenido(a), {user_data['nombre_completo']}!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Usuario o contraseña incorrectos.")
