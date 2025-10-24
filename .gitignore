@@ -1,48 +1,112 @@
-# 🐍 Ignorar entornos virtuales
-.venv/
-.venv1/
-env/
+# ================================================
+# .gitignore - Proyecto Control de Actividades
+# ================================================
 
-# ⚙️ Configuración de VS Code y PyCharm
-.vscode/
+# =====================================
+# 🔒 SECRETS Y CREDENCIALES (CRÍTICO)
+# =====================================
+**/secrets.toml
+proyecto_productividad/.streamlit/secrets.toml
+.streamlit/secrets.toml
+*.env
+.env
+.env.local
 
-# 🔄 Caché y compilados de Python
+# =====================================
+# 🐍 Python
+# =====================================
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 *.pyo
 *.pyd
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# 🌐 Archivos de navegador y perfiles
+# =====================================
+# 🌐 Entornos virtuales
+# =====================================
+.venv/
+.venv1/
+venv/
+env/
+ENV/
+
+# =====================================
+# ⚙️ IDEs y editores
+# =====================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace
+Proyectos.code-workspace
+
+# =====================================
+# 🌐 Navegadores y otros
+# =====================================
 Whatsapp_Firefox/
-!Whatsapp_Firefox/cookies.sqlite  # Solo si es esencial para tu flujo
-
-# 📦 Node.js y frontend
+!Whatsapp_Firefox/cookies.sqlite
 node_modules/
 Node/
 
-# 📁 Ignorar todo por defecto
-*
-
-# ✅ Incluir archivos esenciales
-!.gitignore
-!Accesos.txt
-
-# ✅ Incluir todos los archivos .py en cualquier carpeta
-!**/*.py
-
-# ✅ Incluir carpeta proyecto_productividad y su contenido
-!proyecto_productividad/
-!proyecto_productividad/**/
-!proyecto_productividad/**/*.py
-!proyecto_productividad/**/*.txt
-!proyecto_productividad/**/*.png
-!proyecto_productividad/**/*.yaml
-!Otros/
-!Otros/**/
-!Otros/**/*.py
-Proyectos.code-workspace
-proyecto_productividad/.streamlit/config.toml
-
-# ❌ Excluir específicamente pruebas.py y similares
+# =====================================
+# ❌ Archivos de prueba
+# =====================================
 pru*.py
-proyecto_productividad/.streamlit/secrets.toml
+test*.py
+prueba*.py
+*_test.py
+*_prueba.py
+
+# =====================================
+# 📊 Datos sensibles
+# =====================================
+*.db
+*.sqlite
+*.sqlite3
+data/*.csv
+data/*.xlsx
+
+# =====================================
+# 🗑️ Temporales y logs
+# =====================================
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.cache
+
+# =====================================
+# 💻 Sistema operativo
+# =====================================
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# =====================================
+# ✅ IMPORTANTE: NO ignorar nada más
+# =====================================
+# Todo lo demás SE INCLUYE por defecto
+# (Python, config, assets, etc.)
