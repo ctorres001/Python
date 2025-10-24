@@ -17,3 +17,11 @@ serverAddress = "0.0.0.0"
 [client]
 showErrorDetails = false
 toolbarMode = "minimal"
+
+[client]
+showSidebarNavigation = false
+toolbarMode = "minimal"
+
+[ui]
+hideTopBar = true
+hideSidebarNav = true
