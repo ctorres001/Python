@@ -143,16 +143,18 @@ def show_login_view():
             if not username or not password:
                 st.warning("⚠️ Por favor, ingresa usuario y contraseña.")
             else:
-                conn = get_db_connection()
-                if not conn:
-                    st.error("❌ Error al conectar con la base de datos.")
-                else:
-                    user_data = auth.authenticate_user(conn, username, password)
-
-                    if user_data:
-                        auth.login_user(user_data)
-                        st.success(f"✅ ¡Bienvenido(a), {user_data['nombre_completo']}!")
-                        st.balloons()
-                        st.rerun()
+                # AGREGAR ESTO: Ocultar el spinner de las queries
+                with st.spinner("Verificando credenciales..."):
+                    conn = get_db_connection()
+                    if not conn:
+                        st.error("❌ Error al conectar con la base de datos.")
                     else:
-                        st.error("❌ Usuario o contraseña incorrectos.")
+                        user_data = auth.authenticate_user(conn, username, password)
+                        
+                        if user_data:
+                            auth.login_user(user_data)
+                            st.success(f"✅ ¡Bienvenido(a), {user_data['nombre_completo']}!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Usuario o contraseña incorrectos.")

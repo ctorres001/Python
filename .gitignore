@@ -41,8 +41,8 @@ Node/
 !Otros/**/
 !Otros/**/*.py
 Proyectos.code-workspace
+proyecto_productividad/.streamlit/config.toml
 
 # ❌ Excluir específicamente pruebas.py y similares
 pru*.py
-proyecto_productividad/.streamlit/
 proyecto_productividad/.streamlit/secrets.toml
