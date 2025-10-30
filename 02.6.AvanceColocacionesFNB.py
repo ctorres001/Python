@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 
 class ReporteFNB:
     def __init__(self):
-        self.fecha_filtro = datetime.now() - timedelta(days=1)
-        self.fecha_str = self.fecha_filtro.strftime('%Y-%m-%d')
-        self.fecha_mostrar = self.fecha_filtro.strftime('%d/%m/%Y')
+        # NOTA: La fecha se ajustará después de seleccionar la actividad
+        self.fecha_filtro = None  # Se define en seleccionar_actividad()
+        self.fecha_str = None
+        self.fecha_mostrar = None
+        
         self.ruta_base = Path(r'D:\FNB\Reportes\19. Reportes IBR\02. Avance Colocaciones')
         self.ruta_salida = self.ruta_base / 'Bases'
         self.ruta_imagenes = self.ruta_base / 'Imagenes'
@@ -31,11 +33,11 @@ class ReporteFNB:
         self.df = None
         self.responsables = None
         self.proveedores = None
-        self.solo_canales_propios = False  # NUEVO: para control de filtros
+        self.solo_canales_propios = False
 
         # NUEVOS PARÁMETROS
-        self.modo_render = "chrome"  # Alternar con "matplotlib" si es necesario
-        self.formatear_excel = True  # Para desactivar formato y acelerar
+        self.modo_render = "chrome"
+        self.formatear_excel = True
 
         # Crear carpetas si no existen
         self.ruta_salida.mkdir(exist_ok=True)
@@ -52,6 +54,7 @@ class ReporteFNB:
             'Rangos', 'Zona de Venta', 'Marca', 'Modelo', 'Canal', 'Tipo de Producto',
             'Tipo Instalación', '# Transacciones'
         ]
+
     def seleccionar_archivo(self) -> str:
         """Selecciona el archivo Excel de origen"""
         root = tk.Tk()
@@ -64,17 +67,27 @@ class ReporteFNB:
         return archivo_origen
 
     def seleccionar_actividad(self) -> str:
-        """Selecciona el tipo de actividad y si se procesan solo canales propios"""
+        """Selecciona el tipo de actividad y configura la fecha según el tipo"""
         while True:
             opcion = input("Selecciona una opción:\n1. Avance de Ventas\n2. Cierre de Ventas\nOpción: ").strip()
             if opcion == '1':
                 self.tipo_actividad = "Avance de Ventas FNB"
+                # Para Avance: usa día anterior
+                self.fecha_filtro = datetime.now() - timedelta(days=1)
                 break
             elif opcion == '2':
                 self.tipo_actividad = "Cierre de Ventas FNB"
+                # Para Cierre: usa último día del mes anterior
+                hoy = datetime.now()
+                primer_dia_mes_actual = hoy.replace(day=1)
+                self.fecha_filtro = primer_dia_mes_actual - timedelta(days=1)
                 break
             else:
                 print("Opción inválida. Intenta de nuevo.")
+        
+        # Configurar formatos de fecha
+        self.fecha_str = self.fecha_filtro.strftime('%Y-%m-%d')
+        self.fecha_mostrar = self.fecha_filtro.strftime('%d/%m/%Y')
 
         while True:
             opcion = input("¿Deseas procesar solo Canales Propios?\n1. Sí (IBR PERU y SALESLAND)\n2. No (Canales Completos)\nOpción: ").strip()
@@ -88,6 +101,7 @@ class ReporteFNB:
                 print("Opción inválida. Intenta de nuevo.")
 
         return self.tipo_actividad
+    
     def cargar_datos(self, archivo_origen: str) -> pd.DataFrame:
         """Carga y procesa los datos del archivo Excel"""
         try:
