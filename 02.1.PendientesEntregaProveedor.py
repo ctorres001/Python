@@ -83,6 +83,24 @@ class SistemaReportesAutomaticos:
             feriados_df = pd.read_excel(ruta_feriados)
             feriados = set(pd.to_datetime(feriados_df.iloc[:, 0]).dt.date)
 
+
+            # === AJUSTE SOLICITADO ===
+            # Si Nro. PEDIDO VENTA está vacío o incompleto → usar Nro. DE CONTRATO
+            if 'Nro. PEDIDO VENTA' in base.columns and 'Nro. DE CONTRATO' in base.columns:
+
+                # Convertimos ambos a texto y limpiamos espacios
+                base['Nro. PEDIDO VENTA'] = base['Nro. PEDIDO VENTA'].astype(str).str.strip()
+                base['Nro. DE CONTRATO'] = base['Nro. DE CONTRATO'].astype(str).str.strip()
+
+                # Consideramos estos valores como vacíos / inválidos
+                base['Nro. PEDIDO VENTA'] = base['Nro. PEDIDO VENTA'].replace(
+                    ["", "-", "0", "nan", "None"], pd.NA
+                )
+
+                # Reemplazamos los vacíos con el contrato
+                base['Nro. PEDIDO VENTA'] = base['Nro. PEDIDO VENTA'].fillna(base['Nro. DE CONTRATO'])
+
+
             # Procesamiento de datos
             base['FECHA VENTA'] = pd.to_datetime(base['FECHA VENTA'], errors='coerce', dayfirst=True)
             base['SEDE'] = base['SEDE'].astype(str).str.strip().str.upper()
