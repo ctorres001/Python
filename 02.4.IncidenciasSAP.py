@@ -423,21 +423,22 @@ df_procesado = df_procesado.apply(
 print("✅ Datos limpios y listos para procesamiento\n")
 
 # -------------------------
-# Obtener CANAL_VENTA (cruce)
+# Obtener CANAL_VENTA y TIPO DESPACHO (cruce)
 # -------------------------
-def obtener_canal_venta(df_sap, df_procesado):
+def obtener_canal_venta_y_tipo_despacho(df_sap, df_procesado):
     """
     Cruce por Nro. PEDIDO VENTA primero, luego por Nro. DE CONTRATO
+    También obtiene TIPO DESPACHO del archivo procesado
     """
-    print("🔗 Realizando cruce para obtener CANAL_VENTA...")
+    print("🔗 Realizando cruce para obtener CANAL_VENTA y TIPO DESPACHO...")
 
-    df_canal = df_procesado[['Nro. PEDIDO VENTA', 'Nro. DE CONTRATO', 'CANAL_VENTA']].copy()
+    df_canal = df_procesado[['Nro. PEDIDO VENTA', 'Nro. DE CONTRATO', 'CANAL_VENTA', 'TIPO DESPACHO']].copy()
     df_canal = df_canal.dropna(subset=['CANAL_VENTA'])
 
-    df_canal_pedido = df_canal[['Nro. PEDIDO VENTA', 'CANAL_VENTA']].dropna(subset=['Nro. PEDIDO VENTA'])
+    df_canal_pedido = df_canal[['Nro. PEDIDO VENTA', 'CANAL_VENTA', 'TIPO DESPACHO']].dropna(subset=['Nro. PEDIDO VENTA'])
     df_canal_pedido = df_canal_pedido.drop_duplicates(subset=['Nro. PEDIDO VENTA'], keep='first')
 
-    df_canal_contrato = df_canal[['Nro. DE CONTRATO', 'CANAL_VENTA']].dropna(subset=['Nro. DE CONTRATO'])
+    df_canal_contrato = df_canal[['Nro. DE CONTRATO', 'CANAL_VENTA', 'TIPO DESPACHO']].dropna(subset=['Nro. DE CONTRATO'])
     df_canal_contrato = df_canal_contrato.drop_duplicates(subset=['Nro. DE CONTRATO'], keep='first')
 
     df_sap_trabajo = df_sap[ df_sap['Status General'].notna() & (df_sap['Status General'].astype(str).str.strip() != '') ].copy()
@@ -447,16 +448,21 @@ def obtener_canal_venta(df_sap, df_procesado):
     print(f"📊 Registros totales en SAP original: {len(df_sap)}")
 
     df_sap_trabajo['CANAL_VENTA'] = 'Canal de venta no identificado'
+    df_sap_trabajo['TIPO DESPACHO'] = ''
 
     # Paso 1: por Id FNB mapped to Nro. PEDIDO VENTA if possible
     print("🔄 Paso 1: Cruce por Nro. PEDIDO VENTA (a partir del archivo procesado)...")
-    # Construir diccionario pedido->canal
-    id_pedido_to_canal = df_canal_pedido.set_index('Nro. PEDIDO VENTA')['CANAL_VENTA'].to_dict()
-    # Si 'Id FNB' en SAP representa Nro. PEDIDO VENTA, mapear; en caso contrario no cambiar
     if 'Id FNB' in df_sap_trabajo.columns:
         try:
+            # Crear diccionarios para mapeo
+            id_pedido_to_canal = df_canal_pedido.set_index('Nro. PEDIDO VENTA')['CANAL_VENTA'].to_dict()
+            id_pedido_to_tipo = df_canal_pedido.set_index('Nro. PEDIDO VENTA')['TIPO DESPACHO'].to_dict()
+            
             df_sap_trabajo.loc[:, 'CANAL_VENTA'] = df_sap_trabajo['Id FNB'].map(id_pedido_to_canal).fillna(
                 df_sap_trabajo['CANAL_VENTA']
+            )
+            df_sap_trabajo.loc[:, 'TIPO DESPACHO'] = df_sap_trabajo['Id FNB'].map(id_pedido_to_tipo).fillna(
+                df_sap_trabajo['TIPO DESPACHO']
             )
         except Exception as e:
             print(f"⚠️ Error mapeando Id FNB -> Nro. PEDIDO VENTA: {str(e)}")
@@ -475,9 +481,15 @@ def obtener_canal_venta(df_sap, df_procesado):
 
     if registros_segundo_cruce > 0:
         contrato_to_canal = df_canal_contrato.set_index('Nro. DE CONTRATO')['CANAL_VENTA'].to_dict()
+        contrato_to_tipo = df_canal_contrato.set_index('Nro. DE CONTRATO')['TIPO DESPACHO'].to_dict()
+        
         df_sap_trabajo.loc[mask_para_segundo_cruce, 'CANAL_VENTA'] = (
             df_sap_trabajo.loc[mask_para_segundo_cruce, 'Contrato'].map(contrato_to_canal)
             .fillna('Canal de venta no identificado')
+        )
+        df_sap_trabajo.loc[mask_para_segundo_cruce, 'TIPO DESPACHO'] = (
+            df_sap_trabajo.loc[mask_para_segundo_cruce, 'Contrato'].map(contrato_to_tipo)
+            .fillna('')
         )
         canales_por_contrato = (
                 df_sap_trabajo.loc[mask_para_segundo_cruce, 'CANAL_VENTA'] != 'Canal de venta no identificado'
@@ -504,7 +516,7 @@ def obtener_canal_venta(df_sap, df_procesado):
 print("🔍 Verificando datos SAP antes del cruce...")
 print("\n" + "=" * 50)
 
-df_sap_con_canal = obtener_canal_venta(df_sap, df_procesado)
+df_sap_con_canal = obtener_canal_venta_y_tipo_despacho(df_sap, df_procesado)
 
 # -------------------------
 # Aplicar exoneraciones ANTES de crear escenarios
@@ -519,26 +531,76 @@ fecha_actual_texto = fecha_reporte.strftime('%d/%m/%Y')
 print(f"📅 Fecha del reporte: {fecha_actual} ({fecha_actual_texto})")
 
 # -------------------------
-# Definir escenarios
+# Definir escenarios con segmentación
 # -------------------------
 def crear_escenarios(df):
     todos_los_escenarios = []
+    
+    # Escenario 1: Fecha de Venta diferente
     df_fecha_venta = df[df['Mensaje comparativa F Venta'].notna() & (df['Mensaje comparativa F Venta'] != '')].copy()
     todos_los_escenarios.append(("Fecha de Venta diferente entre SAP y FNB", df_fecha_venta))
+    
+    # Escenario 2: Fecha de Entrega diferente (con columna TIPO DESPACHO)
     df_fecha_entrega = df[df['Mensaje comparativa F Entega'].notna() & (df['Mensaje comparativa F Entega'] != '')].copy()
     todos_los_escenarios.append(("Fecha de Entrega diferente entre SAP y FNB", df_fecha_entrega))
+    
+    # Escenario 3: Responsable de Venta diferente
     df_responsable = df[df['Mensaje comparativa Responsable'].notna() & (df['Mensaje comparativa Responsable'] != '')].copy()
     todos_los_escenarios.append(("Responsable de Venta diferente entre SAP y FNB", df_responsable))
+    
+    # Escenario 4: Aliado Comercial diferente
     df_aliado = df[df['Mensaje comparativa Aliado'].notna() & (df['Mensaje comparativa Aliado'] != '')].copy()
     todos_los_escenarios.append(("Aliado Comercial (Proveedor) diferente entre SAP y FNB", df_aliado))
-    df_sede = df[df['Mensaje comparativa Sede'].notna() & (df['Mensaje comparativa Sede'] != '')].copy()
-    todos_los_escenarios.append(("Sede diferente entre SAP y FNB", df_sede))
+    
+    # Escenario 5: Sede diferente - SEGMENTADO POR COMERCIAL Y PROYECTOS
+    df_sede_base = df[df['Mensaje comparativa Sede'].notna() & (df['Mensaje comparativa Sede'] != '')].copy()
+    
+    # Sede - Comercial: Codigo sede SAP está en blanco
+    condicion_sede_comercial = (
+        df_sede_base['Codigo sede SAP'].isna() | 
+        (df_sede_base['Codigo sede SAP'].astype(str).str.strip() == '') |
+        (df_sede_base['Codigo sede SAP'].astype(str).str.strip() == 'nan')
+    )
+    df_sede_comercial = df_sede_base[condicion_sede_comercial].copy()
+    todos_los_escenarios.append(("Sede diferente entre SAP y FNB - Comercial", df_sede_comercial))
+    
+    # Sede - Proyectos: Codigo sede SAP tiene valor
+    df_sede_proyectos = df_sede_base[~condicion_sede_comercial].copy()
+    todos_los_escenarios.append(("Sede diferente entre SAP y FNB - Proyectos", df_sede_proyectos))
+    
+    # Escenario 6: Importe Financiado diferente
     df_importe = df[df['Mensaje comparativa Importe'].notna() & (df['Mensaje comparativa Importe'] != '')].copy()
     todos_los_escenarios.append(("Importe Financiado diferente entre SAP y FNB", df_importe))
+    
+    # Escenario 7: Nro. de Cuotas diferentes
     df_cuotas = df[df['Mensaje comparativa Cuotas'].notna() & (df['Mensaje comparativa Cuotas'] != '')].copy()
     todos_los_escenarios.append(("Nro. de Cuotas diferentes entre SAP y FNB", df_cuotas))
-    df_estados_diferentes = df[ ~df.apply(lambda row: verificar_estados_equivalentes(row['Estado SAP'], row['Estado FNB']), axis=1)].copy()
-    todos_los_escenarios.append(("Estados de Entrega diferentes entre SAP y FNB", df_estados_diferentes))
+    
+    # Escenario 8: Estados de Entrega diferentes - SEGMENTADO POR COMERCIAL Y PROYECTOS
+    df_estados_diferentes = df[
+        ~df.apply(lambda row: verificar_estados_equivalentes(row['Estado SAP'], row['Estado FNB']), axis=1)
+    ].copy()
+    
+    # Estados - Comercial: 
+    # 1) Estado SAP es RECHAZADO y Estado FNB es ENTREGADO o PENDIENTE DE ENTREGA
+    # 2) Estado FNB contiene "Validación" (case insensitive)
+    condicion_estados_comercial = (
+        (
+            (df_estados_diferentes['Estado SAP'].astype(str).str.upper().str.strip() == 'RECHAZADO') &
+            (df_estados_diferentes['Estado FNB'].astype(str).str.upper().str.strip().isin(['ENTREGADO', 'PENDIENTE DE ENTREGA']))
+        ) |
+        (
+            df_estados_diferentes['Estado FNB'].astype(str).str.upper().str.contains('VALIDACIÓN', na=False)
+        )
+    )
+    df_estados_comercial = df_estados_diferentes[condicion_estados_comercial].copy()
+    todos_los_escenarios.append(("Estados de Entrega diferentes entre SAP y FNB - Comercial", df_estados_comercial))
+    
+    # Estados - Proyectos: el resto
+    df_estados_proyectos = df_estados_diferentes[~condicion_estados_comercial].copy()
+    todos_los_escenarios.append(("Estados de Entrega diferentes entre SAP y FNB - Proyectos", df_estados_proyectos))
+    
+    # Escenario 9 y 10: Contrato
     df_contrato_general = df[df['Mensaje comparativa Contrato'].notna() & (df['Mensaje comparativa Contrato'] != '')].copy()
     condicion_tienda_virtual = (
             df_contrato_general['Contrato SAP'].notna() &
@@ -553,10 +615,19 @@ def crear_escenarios(df):
     ))
     df_contrato_regulares = df_contrato_general[~condicion_tienda_virtual].copy()
     todos_los_escenarios.append(("Nro de Contrato CD - Casos regulares detectados", df_contrato_regulares))
-    df_fnb_no_sap = df[ df['Id FNB'].apply(tiene_datos) & ~df['Numero pedido SAP'].apply(tiene_datos) ].copy()
+    
+    # Escenario 11: Transacciones FNB que no figuran en SAP
+    df_fnb_no_sap = df[
+        df['Id FNB'].apply(tiene_datos) & ~df['Numero pedido SAP'].apply(tiene_datos)
+    ].copy()
     todos_los_escenarios.append(("Transacciones FNB que no figuran en SAP", df_fnb_no_sap))
-    df_sap_no_fnb = df[ df['Numero pedido SAP'].apply(tiene_datos) & ~df['Id FNB'].apply(tiene_datos) ].copy()
+    
+    # Escenario 12: Transacciones SAP que no figuran en FNB
+    df_sap_no_fnb = df[
+        df['Numero pedido SAP'].apply(tiene_datos) & ~df['Id FNB'].apply(tiene_datos)
+    ].copy()
     todos_los_escenarios.append(("Transacciones SAP que no figuran en FNB", df_sap_no_fnb))
+    
     return todos_los_escenarios
 
 print("🔄 Procesando escenarios...")
@@ -584,52 +655,35 @@ if entrada:
 
 # ============================================
 # Generar archivos y texto del correo
-# - Reglas:
-#   * Exonerados individuales -> descartados del análisis (solo van al 2do correo si existen)
-#   * Escenarios exonerados por consola -> NO aparecen en correo principal, se generan archivos y van al 2do correo
-#   * Escenarios normales -> aparecen en correo principal (texto + adjunto)
 # ============================================
 archivos = []  # archivos para correo principal
-exoneradas_archivos = []  # archivos para segundo correo (casuisticas exoneradas)
+exoneradas_archivos = []  # archivos para segundo correo
 resumen_html = "<b>PROYECTOS</b><br><br>"
 
 for idx, (nombre_escenario, df_filtrado) in enumerate(todos_los_escenarios, 1):
 
     if df_filtrado.empty:
-        # Escenario sin registros -> autoexcluido (no aparece en resumen ni en segundo correo)
         continue
 
     # Formatear df para exportar
     df_filtrado_formateado = formatear_df_sap(df_filtrado)
 
-    # Nombre de archivo estándar (sanitize)
-    safe_nombre = re.sub(r'[\\/*?:\[\]]', ' - ', nombre_escenario)  # evitar caracteres inválidos
+    # Nombre de archivo estándar
+    safe_nombre = re.sub(r'[\\/*?:\[\]]', ' - ', nombre_escenario)
     nombre_archivo = f"{safe_nombre} - {fecha_actual}.xlsx"
     ruta_archivo = os.path.join(ruta_salida, nombre_archivo)
 
     if idx in escenarios_excluir:
-        # -------------------------
-        # Escenario EXONERADO por consola:
-        # - NO aparece en el correo principal (ni en texto ni en adjunto)
-        # - Se genera su archivo y se guarda en exoneradas_archivos para el 2do correo
-        # -------------------------
         print(f"⏭️ Escenario EXONERADO (irá únicamente al 2do correo): {nombre_escenario}")
-
-        # Exportar archivo de la casuística exonerada
         try:
             exportar_excel_sap(df_filtrado_formateado, ruta_archivo)
             exoneradas_archivos.append(ruta_archivo)
             print(f"   💾 Archivo exonerado generado: {nombre_archivo}")
         except Exception as e:
             print(f"   ⚠️ Error exportando archivo exonerado {nombre_archivo}: {str(e)}")
-
-        # NO agregar nada al resumen_html para que no aparezca en el correo principal
         continue
 
     else:
-        # -------------------------
-        # Escenario normal (se incluye en correo principal)
-        # -------------------------
         print(f"\n🔄 Procesando: {nombre_escenario}")
         try:
             exportar_excel_sap(df_filtrado_formateado, ruta_archivo)
@@ -691,7 +745,7 @@ else:
                     )
 
                 mail.HTMLBody = cuerpo
-                mail.Send()  # Envío automático
+                mail.Send()
                 print(f"📧 Correo enviado a: {row['Destinatarios directos']}")
 
             except Exception as e:
@@ -703,16 +757,12 @@ else:
 
 # -------------------------
 # Envío de casuísticas exoneradas en segundo correo (automatico)
-# - Este correo contendrá:
-#   1) Archivo con exonerados individuales (df_exonerados_df)  [si existen]
-#   2) Archivos de casuísticas exoneradas (exoneradas_archivos) [si se seleccionaron]
 # -------------------------
 enviar_segundo_correo = False
 archivos_segundo_correo = []
 
 # 1) incluir exonerados individuales si existen
 if total_exonerados > 0 and not df_exonerados_df.empty:
-    # Generar archivo Excel con exonerados individuales
     nombre_archivo_exon_ind = f"Casuisticas_Exoneradas_Individuales - {fecha_actual}.xlsx"
     ruta_archivo_exon_ind = os.path.join(ruta_salida, nombre_archivo_exon_ind)
     try:
@@ -735,13 +785,11 @@ if enviar_segundo_correo:
 
     asunto_exon = f"Reporte de diferencias entre SAP y la plataforma FNB al {fecha_actual} - Casuísticas exoneradas"
 
-    # Construir cuerpo del correo con una breve lista de casuísticas incluidas en este segundo correo
     cuerpo_exon = f"""<html><body style="font-family:Aptos, sans-serif; font-size:11pt;">
     Buenos días:<br><br>
     Las casuísticas reportadas en archivos adjuntos han sido exoneradas para su revisión respecto al funcionamiento del reporte de conciliación de SAP.<br><br>
     <b>Archivos incluidos en este correo:</b><br>
     """
-    # Incluir lista de archivos en el cuerpo
     for a in archivos_segundo_correo:
         cuerpo_exon += f"- {os.path.basename(a)}<br>"
     cuerpo_exon += "<br>Atentamente,<br><br><img src=\"cid:firmaimg\"></body></html>"
@@ -760,7 +808,6 @@ if enviar_segundo_correo:
                         mail.CC = row['Destinatarios en copia']
                     mail.Subject = asunto_exon
 
-                    # Adjuntar todos los archivos del segundo correo
                     for archivo in archivos_segundo_correo:
                         mail.Attachments.Add(archivo)
 
@@ -771,7 +818,7 @@ if enviar_segundo_correo:
                         )
 
                     mail.HTMLBody = cuerpo_exon
-                    mail.Send()  # Envío automático
+                    mail.Send()
                     print(f"📧 Correo de exonerados enviado a: {row['Destinatarios directos']}")
                 except Exception as e:
                     print(f"❌ Error enviando correo de exonerados a {row.get('Destinatarios directos')}: {str(e)}")
