@@ -27,57 +27,144 @@ class WhatsAppSender:
         self.browser = None
         self.page = None
         self.playwright = None
+        self._launch_metrics = {}
 
     async def inicializar_driver(self):
         try:
+            import time, pathlib, shutil
+            t0 = time.time()
+            print("[1/6] Iniciando Playwright...")
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.firefox.launch_persistent_context(
-                user_data_dir=self.profile_dir,
-                headless=False
-            )
+            self._launch_metrics['playwright_start_s'] = round(time.time() - t0, 2)
+
+            # Verificar carpeta de perfil y limpiar locks que pueden bloquear
+            perfil_path = pathlib.Path(self.profile_dir)
+            if perfil_path.exists():
+                lock_files = list(perfil_path.glob('**/lock')) + list(perfil_path.glob('**/*.lock')) + list(perfil_path.glob('**/parent.lock'))
+                for lf in lock_files:
+                    try:
+                        lf.unlink()
+                    except:
+                        pass
+            else:
+                perfil_path.mkdir(parents=True, exist_ok=True)
+
+            print("[2/6] Lanzando Firefox persistente (perfil existente)...")
+            t1 = time.time()
+            try:
+                self.browser = await self.playwright.firefox.launch_persistent_context(
+                    user_data_dir=self.profile_dir,
+                    headless=False,
+                    viewport={'width': 1280, 'height': 800},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
+                )
+            except Exception as e_persist:
+                print(f"   ⚠️ Falló perfil persistente: {e_persist}\n   Intentando perfil limpio temporal...")
+                temp_profile = str(perfil_path.parent / (perfil_path.name + '_TEMP'))
+                # Limpiar si existe
+                try:
+                    shutil.rmtree(temp_profile, ignore_errors=True)
+                except:
+                    pass
+                self.browser = await self.playwright.firefox.launch_persistent_context(
+                    user_data_dir=temp_profile,
+                    headless=False,
+                    viewport={'width': 1280, 'height': 800},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
+                )
+                print("   ✅ Perfil temporal iniciado")
+            self._launch_metrics['firefox_launch_s'] = round(time.time() - t1, 2)
+
+            print("[3/6] Creando nueva página...")
+            t2 = time.time()
             self.page = await self.browser.new_page()
-            await self.page.goto("https://web.whatsapp.com")
-            print("Esperando que WhatsApp cargue...")
+            self._launch_metrics['new_page_s'] = round(time.time() - t2, 2)
+
+            print("[4/6] Navegando a WhatsApp Web...")
+            t3 = time.time()
+            await self.page.goto("https://web.whatsapp.com", timeout=60000)
+            self._launch_metrics['goto_whatsapp_s'] = round(time.time() - t3, 2)
+
+            print("[5/6] Esperando carga inicial selectores...")
 
             # Lista de posibles selectores para detectar que ya cargó
             posibles_selectores = [
                 "[data-testid='chat-list']",
                 "div[role='grid']",                # lista de chats
                 "div[aria-label='Lista de chats']",# accesibilidad
-                "canvas",                          # QR (lo usamos para detectar si ya no está)
+                "#pane-side",                      # panel lateral
             ]
 
             loaded = False
-            for selector in posibles_selectores:
+            timeout_por_selector = 10000  # 10 segundos por selector
+            
+            for i, selector in enumerate(posibles_selectores, 1):
                 try:
-                    await self.page.wait_for_selector(selector, timeout=15000)
-                    print(f"✅ WhatsApp cargado (detectado con {selector})")
+                    print(f"   Intentando selector {i}/{len(posibles_selectores)}: {selector}")
+                    await self.page.wait_for_selector(selector, timeout=timeout_por_selector)
+                    print(f"✅ WhatsApp cargado correctamente (detectado con: {selector})")
                     loaded = True
                     break
-                except:
+                except Exception as e_selector:
+                    print(f"   ⏭️  Selector no encontrado, probando siguiente...")
                     continue
 
             if not loaded:
-                raise Exception("No se pudo detectar la lista de chats, aunque WhatsApp parece cargado")
+                print("[6/6] No se detectó lista de chats inicialmente, comprobando QR...")
+                try:
+                    qr_canvas = await self.page.query_selector("canvas")
+                    if qr_canvas:
+                        print("\n⚠️  Código QR visible. Esperando escaneo (hasta 60s)...")
+                        for intento in range(12):
+                            await asyncio.sleep(5)
+                            print(f"   - Intento {intento+1}/12")
+                            for selector in posibles_selectores:
+                                try:
+                                    await self.page.wait_for_selector(selector, timeout=2000)
+                                    print("✅ Sesión iniciada tras escaneo QR")
+                                    self._launch_metrics['qr_wait_s'] = (intento+1)*5
+                                    print("⏱️ Métricas de lanzamiento:", self._launch_metrics)
+                                    return True
+                                except:
+                                    continue
+                        raise Exception("Timeout QR: no se escaneó en 60s")
+                    else:
+                        raise Exception("Interfaz no reconocida (sin chats ni QR)")
+                except Exception as e_qr:
+                    print(f"   ❌ {e_qr}")
+                    print("⏱️ Métricas de lanzamiento:", self._launch_metrics)
+                    return False
 
+            print("✅ WhatsApp cargado. ⏱️ Métricas de lanzamiento:", self._launch_metrics)
             return True
 
         except Exception as e:
-            print(f"❌ Error inicializando WhatsApp Web: {e}")
+            print(f"\n❌ Error inicializando WhatsApp Web: {e}")
+            print("\nSugerencias:")
+            print("  1. Verifica que Firefox esté cerrado completamente")
+            print("  2. Elimina el perfil corrupto: d:/FNB/Proyectos/Python/Whatsapp_Firefox")
+            print("  3. Vuelve a escanear el código QR")
+            print("  4. Ejecuta: python -m playwright install firefox")
+            print("  5. Prueba sin perfil persistente (comentando user_data_dir)")
             return False
 
     async def buscar_contacto(self, numero: str):
         """Abre el chat del número usando URL directa"""
         try:
             url = f"https://web.whatsapp.com/send?phone={numero.replace('+','').replace(' ','')}"
-            await self.page.goto(url)
+            print(f"   🔍 Buscando contacto: {numero}")
+            
+            await self.page.goto(url, timeout=30000)
+            await asyncio.sleep(2)  # Esperar que cargue el chat
 
             # Esperar a que cargue el chat: buscamos el input de mensajes
-            await self.page.wait_for_selector("footer div[contenteditable='true']", timeout=20000)
-            print(f"✅ Chat abierto con {numero}")
+            print(f"   ⏳ Esperando que abra el chat...")
+            await self.page.wait_for_selector("footer div[contenteditable='true']", timeout=15000)
+            print(f"   ✅ Chat abierto correctamente")
             return True
         except Exception as e:
-            print(f"❌ No se pudo abrir chat con {numero}: {e}")
+            print(f"   ❌ Error abriendo chat: {e}")
+            print(f"   Posibles causas: número inválido, conexión lenta, o WhatsApp Web no respondió")
             return False
 
 
@@ -85,22 +172,36 @@ class WhatsAppSender:
         """Envía un mensaje de texto"""
         try:
             box = await self.page.wait_for_selector("footer div[contenteditable='true']", timeout=10000)
+            
+            # Limpiar el campo antes de escribir
+            await box.click()
+            await self.page.keyboard.press("Control+A")
+            await self.page.keyboard.press("Backspace")
+            await asyncio.sleep(0.3)
 
             for line in mensaje.split("\n"):
-                await box.type(line)
+                await box.type(line, delay=20)  # Delay para simular escritura natural
                 await box.press("Shift+Enter")
+            
+            await asyncio.sleep(0.5)  # Pequeña pausa antes de enviar
             await box.press("Enter")
+            await asyncio.sleep(1)  # Esperar confirmación de envío
 
-            print("✅ Mensaje enviado")
+            print("      ✅ Mensaje enviado")
             return True
         except Exception as e:
-            print(f"❌ Error enviando mensaje: {e}")
+            print(f"      ❌ Error enviando mensaje: {e}")
             return False
 
 
     async def enviar_imagen(self, ruta_imagen: str):
         """Envía una imagen pegándola desde el portapapeles"""
         try:
+            # Verificar que el archivo existe
+            if not os.path.exists(ruta_imagen):
+                print(f"      ❌ Archivo no encontrado: {ruta_imagen}")
+                return False
+            
             # Abrir la imagen con PIL
             image = Image.open(ruta_imagen)
 
@@ -115,22 +216,26 @@ class WhatsAppSender:
             win32clipboard.EmptyClipboard()
             win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
             win32clipboard.CloseClipboard()
+            await asyncio.sleep(0.3)
 
             # Focar caja de texto
             box = await self.page.wait_for_selector("footer div[contenteditable='true']", timeout=10000)
             await box.click()
+            await asyncio.sleep(0.3)
 
             # Pegar con Ctrl+V
             await self.page.keyboard.press("Control+V")
-            await asyncio.sleep(2)  # esperar que cargue preview
+            await asyncio.sleep(3)  # esperar que cargue preview (aumentado)
 
             # Enter para enviar
             await self.page.keyboard.press("Enter")
+            await asyncio.sleep(2)  # esperar confirmación de envío
 
-            print(f"✅ Imagen enviada (pegada): {os.path.basename(ruta_imagen)}")
+            print(f"      ✅ Imagen enviada: {os.path.basename(ruta_imagen)}")
             return True
         except Exception as e:
-            print(f"❌ Error enviando imagen pegada: {e}")
+            print(f"      ❌ Error enviando imagen: {e}")
+            print(f"         Archivo: {os.path.basename(ruta_imagen)}")
             return False
 
     async def cerrar(self):
@@ -398,18 +503,29 @@ class SalesImageGenerator:
         fecha_limite = pd.to_datetime('2024-02-01', format='%Y-%m-%d')
         fecha_limite_1 = pd.to_datetime('2025-08-01', format='%Y-%m-%d')
 
-        cond_retail = (fecha_venta >= fecha_limite) & (responsable.isin(["CONECTA RETAIL", "INTEGRA RETAIL"]))
-        cond_retail_1 = (fecha_venta >= fecha_limite_1) & (responsable.isin(["TOPITOP"]))
+        # ORDEN CORRECTO: Aplicar de menor a mayor prioridad (RETAIL sobrescribe todo al final)
+        
+        # 1. Materiales por categoría (EXCEPTO A&G, INCOSER, PROMART que van por SEDE)
         cond_materiales = (categoria == "MATERIALES Y ACABADOS DE CONSTRUCCIÓN") & (~responsable.isin(
             ["A & G INGENIERIA", "INCOSER GAS PERU S.A.C.", "PROMART"]))
-        cond_motos = categoria.isin(["MOTOS", "MOTOS ELECTRICAS", "ACCESORIOS MOTOS"])
-        cond_merpes = (aliado == "GRUPO MERPES") & (categoria == "MUEBLES")
-
-        canal.loc[cond_retail] = "RETAIL"
-        canal.loc[cond_retail_1] = "RETAIL"
         canal.loc[cond_materiales] = "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
-        canal.loc[cond_motos] = "MOTOS"
+        
+        # 2. Grupo Merpes: MATERIALES (si categoría es MATERIALES) o MUEBLES → ambos van a MATERIALES
+        cond_merpes = (aliado == "GRUPO MERPES") & (
+            (categoria == "MATERIALES Y ACABADOS DE CONSTRUCCIÓN") | (categoria == "MUEBLES")
+        )
         canal.loc[cond_merpes] = "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
+        
+        # 3. Motos (prioridad sobre MATERIALES pero no sobre RETAIL)
+        cond_motos = categoria.isin(["MOTOS", "MOTOS ELECTRICAS", "ACCESORIOS MOTOS"])
+        canal.loc[cond_motos] = "MOTOS"
+        
+        # 4. RETAIL tiene MÁXIMA PRIORIDAD - sobrescribe TODO (motos, materiales, etc.)
+        cond_retail = (fecha_venta >= fecha_limite) & (responsable.isin(["CONECTA RETAIL", "INTEGRA RETAIL"]))
+        canal.loc[cond_retail] = "RETAIL"
+        
+        cond_retail_1 = (fecha_venta >= fecha_limite_1) & (responsable.isin(["TOPITOP"]))
+        canal.loc[cond_retail_1] = "RETAIL"
 
         # Identificar registros sin canal asignado que necesitan mapeo por SEDE
         mask_sin_canal = canal == ''
@@ -1161,6 +1277,7 @@ class SalesImageGenerator:
     # ========================================================
     async def enviar_reporte_whatsapp(self, imagenes_generadas, fecha_anterior, fecha_nueva):
         print("\n=== ENVIANDO REPORTE POR WHATSAPP ===")
+        print(f"Total de imágenes a enviar: {len(imagenes_generadas)}")
         
         # Modificar para agregar más numeros
         numeros_destino = [
@@ -1172,9 +1289,18 @@ class SalesImageGenerator:
 
         whatsapp = WhatsAppSender()
         
-        if not await whatsapp.inicializar_driver():
-            print("❌ No se pudo inicializar WhatsApp Web")
+        print("\n🔄 Inicializando WhatsApp Web...")
+        inicializado = await whatsapp.inicializar_driver()
+        
+        if not inicializado:
+            print("\n❌ No se pudo inicializar WhatsApp Web")
+            print("\nAcciones recomendadas:")
+            print("  1. Cierra todos los navegadores Firefox abiertos")
+            print("  2. Elimina el perfil: D:/FNB/Proyectos/Python/Whatsapp_Firefox")
+            print("  3. Ejecuta el script nuevamente y escanea el código QR")
             return False
+        
+        print("✅ WhatsApp Web inicializado correctamente\n")
         
         try:
             # NUEVO: Determinar saludo según la hora actual
@@ -1214,36 +1340,69 @@ class SalesImageGenerator:
                         imagenes_disponibles[patron_imagen] = ruta
                         break
             
-            for numero in numeros_destino:
-                print(f"\n📱 Enviando reporte al número: {numero}")
+            for idx_numero, numero in enumerate(numeros_destino, 1):
+                print(f"\n📱 [{idx_numero}/{len(numeros_destino)}] Enviando reporte al número: {numero}")
                 
                 if not await whatsapp.buscar_contacto(numero):
-                    print(f"❌ No se pudo encontrar el contacto {numero}")
+                    print(f"   ❌ No se pudo abrir chat con {numero}, continuando con el siguiente...")
                     continue
                 
-                for i, (mensaje, patron_imagen) in enumerate(estructura_envio):
+                envios_exitosos = 0
+                envios_fallidos = 0
+                
+                for i, (mensaje, patron_imagen) in enumerate(estructura_envio, 1):
                     try:
                         if patron_imagen is None:
-                            print(f"   {i+1:2d}. Enviando: {mensaje}")
-                            await whatsapp.enviar_mensaje(mensaje)
+                            # Solo mensaje de texto
+                            print(f"   [{i:2d}/{len(estructura_envio)}] {mensaje}")
+                            exito = await whatsapp.enviar_mensaje(mensaje)
+                            if exito:
+                                envios_exitosos += 1
+                            else:
+                                envios_fallidos += 1
                         else:
+                            # Mensaje + imagen
                             if patron_imagen in imagenes_disponibles:
                                 ruta_imagen = imagenes_disponibles[patron_imagen]
-                                print(f"   {i+1:2d}. Enviando: {mensaje}")
-                                await whatsapp.enviar_mensaje(mensaje)
-                                await whatsapp.enviar_imagen(ruta_imagen)
+                                print(f"   [{i:2d}/{len(estructura_envio)}] {mensaje}")
+                                
+                                # Enviar mensaje
+                                exito_msg = await whatsapp.enviar_mensaje(mensaje)
+                                if not exito_msg:
+                                    envios_fallidos += 1
+                                    continue
+                                
+                                # Enviar imagen
+                                exito_img = await whatsapp.enviar_imagen(ruta_imagen)
+                                if exito_img:
+                                    envios_exitosos += 1
+                                else:
+                                    envios_fallidos += 1
                             else:
-                                print(f"   {i+1:2d}. ⚠️ Imagen no disponible para: {mensaje}")
+                                print(f"   [{i:2d}/{len(estructura_envio)}] ⚠️ Imagen no disponible: {mensaje}")
                         
-                        await asyncio.sleep(4)
+                        # Pausa entre envíos (reducido de 4 a 2 segundos)
+                        await asyncio.sleep(2)
+                        
                     except Exception as e:
-                        print(f"      ❌ Error en envío: {e}")
+                        print(f"      ❌ Error en envío #{i}: {e}")
+                        envios_fallidos += 1
+                        # Continuar con el siguiente envío
+                        continue
                 
-                print(f"✅ Reporte completado para {numero}")
+                print(f"\n   ✅ Reporte completado para {numero}")
+                print(f"   📊 Exitosos: {envios_exitosos} | Fallidos: {envios_fallidos}")
             
             return True
+        except asyncio.TimeoutError:
+            print("\n❌ TIMEOUT: El proceso de envío excedió el tiempo límite")
+            print("   Verifica tu conexión a internet y el estado de WhatsApp Web")
+            return False
         except Exception as e:
-            print(f"❌ Error durante el envío: {e}")
+            print(f"\n❌ Error durante el envío: {e}")
+            import traceback
+            print("\nDetalles del error:")
+            traceback.print_exc()
             return False
         finally:
             print("\n🔒 Cerrando WhatsApp Web...")
@@ -1332,7 +1491,22 @@ async def generar_reporte_imagenes():
         col_importe, fecha_anterior, fecha_nueva, hora_corte
     )
 
-    await generator.enviar_reporte_whatsapp(imagenes_generadas, fecha_anterior, fecha_nueva)
+    # Enviar reporte con timeout de 10 minutos (600 segundos)
+    print(f"\n{'='*60}")
+    print("Iniciando envío de reporte por WhatsApp...")
+    print(f"Timeout máximo: 10 minutos")
+    print(f"{'='*60}")
+    
+    try:
+        await asyncio.wait_for(
+            generator.enviar_reporte_whatsapp(imagenes_generadas, fecha_anterior, fecha_nueva),
+            timeout=600  # 10 minutos
+        )
+    except asyncio.TimeoutError:
+        print("\n⏱️ TIMEOUT GLOBAL: El proceso completo excedió los 10 minutos")
+        print("   El reporte puede estar incompleto")
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}")
 
 
 # ============================================================
