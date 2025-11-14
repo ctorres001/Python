@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 import logging
 from typing import List, Tuple, Optional
-import dataframe_image as dfi
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -39,9 +38,9 @@ class ReporteFNB:
         self.modo_render = "chrome"
         self.formatear_excel = True
 
-        # Crear carpetas si no existen
-        self.ruta_salida.mkdir(exist_ok=True)
-        self.ruta_imagenes.mkdir(exist_ok=True)
+        # Crear carpetas si no existen (incluyendo padres)
+        self.ruta_salida.mkdir(parents=True, exist_ok=True)
+        self.ruta_imagenes.mkdir(parents=True, exist_ok=True)
 
         # Columnas necesarias
         self.columnas_deseadas = [
@@ -258,6 +257,13 @@ class ReporteFNB:
     def crear_imagen_tabla(self, df_tabla: pd.DataFrame, nombre_archivo: str) -> Optional[str]:
         """Crea imagen de tabla completa usando dataframe_image y chrome sin recortes"""
         try:
+            # Lazy import para evitar retrasos en el inicio si no se requiere
+            try:
+                import dataframe_image as dfi
+            except Exception as ie:
+                logger.error(f"dataframe_image no disponible: {ie}")
+                return None
+
             if df_tabla.empty:
                 return None
 
