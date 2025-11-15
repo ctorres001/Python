@@ -4,9 +4,11 @@ import re
 import chardet
 import pyodbc
 from sqlalchemy import create_engine, text
+from sqlalchemy import types as satypes
 import os
 from datetime import datetime
 import warnings
+import unicodedata
 
 # Suprimir warnings específicos
 warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
@@ -16,7 +18,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para RECHAZADOS
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\10. Octubre\BD01102025\BD01102025_Rechazados.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\11. Noviembre\BD01112025\BD01112025_Rechazados.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
@@ -73,6 +75,49 @@ def detectar_separador(linea_cabecera):
             return sep
     return '\t'
 
+def _normalizar_texto(s: str) -> str:
+    """Normaliza texto: minúsculas, sin acentos, sin puntuación extra, colapsa espacios."""
+    if s is None:
+        return ''
+    s = str(s).strip()
+    s = unicodedata.normalize('NFKD', s)
+    s = ''.join(c for c in s if not unicodedata.combining(c))
+    s = s.lower()
+    s = re.sub(r"[\.::;\\/\\-]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def detectar_fila_cabecera(lineas, max_busqueda=50):
+    """Detecta dinámicamente la fila de cabecera escaneando las primeras líneas.
+    Retorna: (idx_cabecera, separador, columnas_cabecera) o (None, None, None)
+    """
+    nombres_esperados_norm = set(_normalizar_texto(k) for k in MAPEO_NOMBRES_COLUMNAS.keys())
+    mejor = {'idx': None, 'sep': None, 'cols': None, 'score': -1, 'total_cols': 0}
+    limite = min(len(lineas), max_busqueda)
+    for i in range(limite):
+        l = lineas[i].strip('\n')
+        if not l:
+            continue
+        candidatos = ['\t', ';', ',', '|']
+        mejor_local = None
+        for sep in candidatos:
+            partes = l.split(sep)
+            if len(partes) < 3:
+                continue
+            score = 0
+            for p in partes:
+                if _normalizar_texto(p) in nombres_esperados_norm:
+                    score += 1
+            if mejor_local is None or score > mejor_local['score'] or (score == mejor_local['score'] and len(partes) > mejor_local['cols']):
+                mejor_local = {'sep': sep, 'cols': len(partes), 'score': score, 'partes': partes}
+        if mejor_local and (mejor_local['score'] > mejor['score'] or (mejor_local['score'] == mejor['score'] and mejor_local['cols'] > mejor['total_cols'])):
+            mejor.update({'idx': i, 'sep': mejor_local['sep'], 'cols': mejor_local['partes'], 'score': mejor_local['score'], 'total_cols': mejor_local['cols']})
+        if mejor['score'] >= 3 and mejor['total_cols'] >= 4:
+            break
+    if mejor['idx'] is not None:
+        return mejor['idx'], mejor['sep'], mejor['cols']
+    return None, None, None
+
 def analizar_archivo_txt(archivo_entrada):
     """Analiza la estructura del archivo antes de la limpieza"""
     print("=== ANÁLISIS DEL ARCHIVO TXT RECHAZADOS ===")
@@ -83,25 +128,26 @@ def analizar_archivo_txt(archivo_entrada):
         lineas = file.readlines()
     
     print(f"Total de líneas: {len(lineas)}")
-    
-    if len(lineas) > 8:
-        separador = detectar_separador(lineas[8])
-        cabecera = lineas[8].strip().split(separador)
+    idx_cab, separador, cabecera = detectar_fila_cabecera(lineas)
+    if idx_cab is not None:
+        print(f"Cabecera detectada en fila: {idx_cab + 1}")
+        print(f"Separador detectado: {'TAB' if separador == '\\t' else separador}")
         print(f"Cabecera detectada: {len(cabecera)} columnas")
         print(f"Columnas: {', '.join(cabecera[:6])}")
-        
         problemas = []
-        for i, linea in enumerate(lineas[10:], start=11):
+        inicio = idx_cab + 1
+        for i, linea in enumerate(lineas[inicio:], start=inicio + 1):
             if linea.strip() == '':
                 continue
             campos = linea.strip().split(separador)
             if len(campos) != len(cabecera):
                 problemas.append((i, len(campos)))
-        
         if problemas:
             print(f"Filas con problemas de estructura: {len(problemas)}")
         else:
             print("✅ No se detectaron problemas de estructura")
+    else:
+        print("⚠️  No se pudo detectar dinámicamente la cabecera. Se usará la heurística anterior (fila 9).")
     
     print("=" * 50)
 
@@ -116,12 +162,19 @@ def limpiar_archivo_txt(archivo_entrada):
     
     print(f"Total de líneas leídas: {len(lineas)}")
     
-    if len(lineas) <= 8:
+    if len(lineas) < 2:
         print("❌ Error: El archivo no tiene suficientes líneas para procesar")
         return None
     
-    separador = detectar_separador(lineas[8])
-    cabecera_raw = lineas[8].strip().split(separador)
+    idx_cab, separador, cabecera_raw = detectar_fila_cabecera(lineas)
+    if idx_cab is None:
+        print("⚠️  No se detectó cabecera dinámicamente; se usará fila 9 como cabecera.")
+        base_idx = 8 if len(lineas) > 8 else 0
+        separador = detectar_separador(lineas[base_idx])
+        cabecera_raw = lineas[base_idx].strip().split(separador)
+        idx_cab = base_idx
+    else:
+        print(f"✅ Cabecera localizada en fila {idx_cab + 1} con separador {'TAB' if separador == '\\t' else separador}")
     
     # Limpiar cabecera
     cabecera = []
@@ -134,20 +187,40 @@ def limpiar_archivo_txt(archivo_entrada):
     num_columnas_esperadas = len(cabecera)
     print(f"Cabecera extraída: {num_columnas_esperadas} columnas")
     print(f"Columnas detectadas: {', '.join(cabecera)}")
+
+    # Identificar y remover columnas en blanco de la cabecera
+    idx_cabeceras_vacias = [i for i, col in enumerate(cabecera) if col.startswith('Columna_') or col.strip() == '']
+    if idx_cabeceras_vacias:
+        print(f"🧹 Columnas vacías en cabecera detectadas: {len(idx_cabeceras_vacias)}. Serán removidas del esquema.")
+    cabecera_filtrada = [col for i, col in enumerate(cabecera) if i not in idx_cabeceras_vacias]
+    num_cols_esperadas_final = len(cabecera_filtrada)
     
-    # Procesar datos desde fila 11 (índice 10)
-    datos_raw = lineas[10:]
+    # Procesar datos a partir de la línea siguiente a la cabecera
+    datos_raw = lineas[idx_cab + 1:]
     datos_limpios = []
     filas_omitidas = 0
     
-    for i, linea in enumerate(datos_raw, start=11):
+    for i, linea in enumerate(datos_raw, start=idx_cab + 2):
         if linea.strip() == '':
             continue
             
         campos = linea.strip().split(separador)
-        
-        if len(campos) == num_columnas_esperadas:
-            datos_limpios.append(campos)
+
+        # Padding/corte para igualar a la cabecera original
+        if len(campos) < num_columnas_esperadas:
+            campos = campos + [''] * (num_columnas_esperadas - len(campos))
+        elif len(campos) > num_columnas_esperadas:
+            campos = campos[:num_columnas_esperadas]
+
+        # Filtrar columnas vacías
+        campos_filtrados = [campos[k] for k in range(min(len(campos), num_columnas_esperadas)) if k not in idx_cabeceras_vacias]
+
+        # Ajustar a tamaño final
+        if len(campos_filtrados) < num_cols_esperadas_final:
+            campos_filtrados += [''] * (num_cols_esperadas_final - len(campos_filtrados))
+
+        if len(campos_filtrados) == num_cols_esperadas_final:
+            datos_limpios.append(campos_filtrados)
         else:
             filas_omitidas += 1
     
@@ -159,25 +232,36 @@ def limpiar_archivo_txt(archivo_entrada):
         print("❌ No se procesaron datos válidos")
         return None
     
-    # Crear DataFrame
-    df = pd.DataFrame(datos_limpios, columns=cabecera)
+    # Crear DataFrame con cabecera filtrada
+    df = pd.DataFrame(datos_limpios, columns=cabecera_filtrada)
     
     # Eliminar columnas vacías
     columnas_a_eliminar = [col for col in df.columns if 'Columna' in col]
     if columnas_a_eliminar:
         df = df.drop(columns=columnas_a_eliminar)
     
-    # FILTRAR SOLO COLUMNAS MAPEADAS
-    columnas_originales_mapeadas = list(MAPEO_NOMBRES_COLUMNAS.keys())
-    columnas_existentes = [col for col in df.columns if col in columnas_originales_mapeadas]
-    
-    if len(columnas_existentes) < len(columnas_originales_mapeadas):
-        columnas_faltantes = set(columnas_originales_mapeadas) - set(columnas_existentes)
-        print(f"⚠️  Columnas esperadas pero no encontradas: {', '.join(columnas_faltantes)}")
-    
-    # Mantener solo las columnas mapeadas
-    df = df[columnas_existentes]
-    print(f"✅ Columnas seleccionadas (mapeadas): {', '.join(columnas_existentes)}")
+    # FILTRAR SOLO COLUMNAS MAPEADAS agrupando sinónimos
+    grupos_por_destino = {}
+    for original, destino in MAPEO_NOMBRES_COLUMNAS.items():
+        grupos_por_destino.setdefault(destino, []).append(original)
+
+    seleccionadas = []
+    faltantes = []
+    for destino, originales in grupos_por_destino.items():
+        encontrada = next((col for col in df.columns if col in originales), None)
+        if encontrada is not None:
+            seleccionadas.append(encontrada)
+        else:
+            faltantes.append(originales[0])
+
+    if seleccionadas:
+        df = df[seleccionadas]
+        print(f"✅ Columnas seleccionadas (mapeadas): {', '.join(seleccionadas)}")
+    else:
+        print("❌ No se encontraron coincidencias con el mapeo. Se conservan todas las columnas para evitar pérdida total.")
+
+    if faltantes:
+        print(f"⚠️  Columnas esperadas pero no encontradas: {', '.join(faltantes)}")
     
     # Limpieza general
     df = aplicar_limpieza_general(df)
@@ -194,7 +278,9 @@ def aplicar_limpieza_general(df):
             df[col] = df[col].str.replace('\r', ' ', regex=False)
             df[col] = df[col].str.replace('\t', ' ', regex=False)
             df[col] = df[col].str.strip()
-            df[col] = df[col].replace(['nan', 'NaN', 'NULL', ''], np.nan)
+            mask_nulls = df[col].isin(['nan', 'NaN', 'NULL', ''])
+            if mask_nulls.any():
+                df.loc[mask_nulls, col] = np.nan
     
     df = convertir_tipos_datos_basicos(df)
     
@@ -208,7 +294,7 @@ def convertir_tipos_datos_basicos(df):
             muestra = df[col].dropna().head(10)
             if any(re.match(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', str(val)) for val in muestra):
                 try:
-                    df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+                    df[col] = _parse_datetime_series(df[col])
                     continue
                 except:
                     pass
@@ -224,6 +310,29 @@ def convertir_tipos_datos_basicos(df):
                 pass
     
     return df
+
+def _parse_datetime_series(series: pd.Series) -> pd.Series:
+    """Parsea fechas intentando formatos comunes y evita UserWarning de inferencia."""
+    s = series.astype(str).str.strip()
+    sample = s.dropna().head(50)
+    fmt = None
+    patterns = [
+        (r'^\d{1,2}/\d{1,2}/\d{4}$', '%d/%m/%Y'),
+        (r'^\d{1,2}-\d{1,2}-\d{4}$', '%d-%m-%Y'),
+        (r'^\d{1,2}/\d{1,2}/\d{2}$', '%d/%m/%y'),
+        (r'^\d{1,2}-\d{1,2}-\d{2}$', '%d-%m-%y'),
+    ]
+    for pat, f in patterns:
+        if sample.apply(lambda x: bool(re.match(pat, str(x)))).mean() > 0.6:
+            fmt = f
+            break
+    if fmt:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=UserWarning)
+            return pd.to_datetime(s, format=fmt, errors='coerce')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', category=UserWarning)
+        return pd.to_datetime(s, errors='coerce', dayfirst=True)
 
 # ======================
 # FUNCIONES OPTIMIZADAS PARA SQL SERVER
@@ -315,7 +424,7 @@ def convertir_tipos_datos_sql(df):
                 df[col] = df[col].round(2)
                 
             elif sql_type == "DATETIME":
-                df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+                df[col] = _parse_datetime_series(df[col])
             
             print(f"✓ {col}: {sql_type}")
             
@@ -334,7 +443,9 @@ def limpiar_datos_sql(df):
             df[col] = df[col].str.replace("\r", " ", regex=False)
             df[col] = df[col].str.replace("\t", " ", regex=False)
             df[col] = df[col].str.replace('"', '""', regex=False)
-            df[col] = df[col].replace(['nan', 'NaN', 'None'], None)
+            mask_nulls = df[col].isin(['nan', 'NaN', 'None'])
+            if mask_nulls.any():
+                df.loc[mask_nulls, col] = None
     
     return df
 
@@ -409,13 +520,35 @@ def preparar_dataframe_para_sql(df):
     
     return df_prep
 
+def _build_sqlalchemy_dtype_map(columns):
+    """Construye un mapa dtype para to_sql usando COLUMN_TYPES_SQL."""
+    dtype_map = {}
+    for col in columns:
+        sql_t = COLUMN_TYPES_SQL.get(col)
+        if not sql_t:
+            continue
+        if sql_t.startswith('VARCHAR'):
+            m = re.search(r'VARCHAR\((\d+)\)', sql_t)
+            length = int(m.group(1)) if m else 500
+            dtype_map[col] = satypes.String(length=length)
+        elif sql_t == 'BIGINT':
+            dtype_map[col] = satypes.BigInteger()
+        elif sql_t == 'INT':
+            dtype_map[col] = satypes.Integer()
+        elif sql_t.startswith('DECIMAL'):
+            m = re.search(r'DECIMAL\((\d+),(\d+)\)', sql_t)
+            precision = int(m.group(1)) if m else 18
+            scale = int(m.group(2)) if m else 2
+            dtype_map[col] = satypes.Numeric(precision=precision, scale=scale)
+        elif sql_t == 'DATETIME':
+            dtype_map[col] = satypes.DateTime()
+    return dtype_map
+
 def cargar_dataframe_a_sql_optimizado(df, table_name):
-    """Carga optimizada basada en CSV temporal"""
+    """Carga optimizada en memoria con chunks y dtypes explícitos (evita CSV)."""
     print(f"\n🚀 Carga OPTIMIZADA a SQL Server...")
     print(f"   Tabla: {table_name}")
     print(f"   Registros: {len(df):,}")
-    
-    temp_csv = None
     
     try:
         # 1. Preparar DataFrame
@@ -428,16 +561,11 @@ def cargar_dataframe_a_sql_optimizado(df, table_name):
             print("❌ Operación cancelada")
             return False
         
-        # 3. CREAR CSV TEMPORAL
-        temp_csv = f"temp_{table_name}_{datetime.now().strftime('%H%M%S')}.csv"
-        
-        df_prep.to_csv(temp_csv, index=False, sep="¬", encoding="utf-8")
-        
-        # 4. CONFIGURAR ENGINE OPTIMIZADO
+        # 3. CONFIGURAR ENGINE OPTIMIZADO
         conn_str = f"mssql+pyodbc://{SQL_CONFIG['username']}:{SQL_CONFIG['password']}@{SQL_CONFIG['server']}/{SQL_CONFIG['database']}?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
         engine = create_engine(conn_str, fast_executemany=True)
         
-        # 5. MANEJAR TABLA SEGÚN ACCIÓN
+        # 4. MANEJAR TABLA SEGÚN ACCIÓN
         if accion == 'replace':
             with engine.begin() as conn:
                 conn.execute(text(f"DROP TABLE IF EXISTS [{table_name}]"))
@@ -449,30 +577,30 @@ def cargar_dataframe_a_sql_optimizado(df, table_name):
         else:
             if_exists_mode = 'append' if accion == 'append' else 'fail'
         
-        # 6. CARGAR EN CHUNKS OPTIMIZADO
+        # 5. CARGAR EN CHUNKS OPTIMIZADO (IN-MEMORY)
         chunksize = 50000
         total_chunks_loaded = 0
-        
+        dtype_map = _build_sqlalchemy_dtype_map(df_prep.columns)
         print(f"\n📊 Cargando en chunks de {chunksize:,}...")
-        
-        for chunk in pd.read_csv(temp_csv, sep="¬", encoding="utf-8", chunksize=chunksize, engine="python"):
+        n = len(df_prep)
+        for start in range(0, n, chunksize):
+            end = min(start + chunksize, n)
+            chunk = df_prep.iloc[start:end]
             chunk.to_sql(
-                table_name, 
-                engine, 
-                if_exists=if_exists_mode, 
+                table_name,
+                engine,
+                if_exists=if_exists_mode,
                 index=False,
-                method=None
+                method=None,
+                dtype=dtype_map if if_exists_mode == 'fail' else None
             )
-            
             total_chunks_loaded += 1
-            registros_cargados = min(total_chunks_loaded * chunksize, len(df))
-            print(f"  Chunk {total_chunks_loaded}: {registros_cargados:,} de {len(df):,} registros", end='\r')
-            
+            print(f"  Chunk {total_chunks_loaded}: {end:,} de {n:,} registros", end='\r')
             if_exists_mode = 'append'
         
         print()  # Nueva línea después del progreso
         
-        # 7. VERIFICAR CARGA Y LIMPIAR
+        # 6. VERIFICAR CARGA
         with engine.connect() as conn:
             result = conn.execute(text(f"SELECT COUNT(*) FROM [{table_name}]"))
             count_final = result.fetchone()[0]
@@ -490,15 +618,6 @@ def cargar_dataframe_a_sql_optimizado(df, table_name):
         import traceback
         traceback.print_exc()
         return False
-    
-    finally:
-        # Limpiar archivo temporal
-        if temp_csv and os.path.exists(temp_csv):
-            try:
-                os.remove(temp_csv)
-                print(f"🗑️  Archivo temporal eliminado")
-            except:
-                print(f"⚠️  No se pudo eliminar: {temp_csv}")
 
 def mostrar_resumen_proceso(df, archivo_original, csv_generado=None):
     """Muestra resumen completo del proceso"""
