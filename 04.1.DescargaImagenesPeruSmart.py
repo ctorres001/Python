@@ -5,6 +5,9 @@ import re
 from urllib.parse import urlparse
 from PIL import Image
 import io
+import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Ruta del archivo Excel
 archivo_excel = r"D:\FNB\Productos\Productos\Descargar Peru Smart\Base.xlsx"
@@ -100,10 +103,68 @@ def convertir_png_a_jpg(imagen_bytes):
         return imagen_bytes, '.jpg'
 
 
+# Sesión HTTP con reintentos y timeouts claros
+def crear_sesion(reintentos=3, backoff=0.5):
+    session = requests.Session()
+    retry = Retry(
+        total=reintentos,
+        connect=reintentos,
+        read=reintentos,
+        status=reintentos,
+        backoff_factor=backoff,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "HEAD"],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+
+def descargar_con_fallback(url, headers, session, connect_timeout=8, read_timeout=20):
+    # 1) Intento normal (HTTPS, verificación SSL activa)
+    try:
+        return session.get(url, headers=headers, timeout=(connect_timeout, read_timeout), allow_redirects=True)
+    except requests.exceptions.SSLError as e:
+        print(f"🔒 SSLError con verificación SSL. Reintentando sin verificación: {e}")
+        try:
+            return session.get(url, headers=headers, timeout=(connect_timeout, read_timeout), allow_redirects=True, verify=False)
+        except Exception as e2:
+            print(f"🔁 Fallback SSL sin verificación falló: {e2}")
+            # 2) Fallback a HTTP si era HTTPS
+            if url.lower().startswith('https://'):
+                url_http = 'http://' + url[8:]
+                print(f"🌐 Probando fallback HTTP: {url_http}")
+                return session.get(url_http, headers=headers, timeout=(connect_timeout, read_timeout), allow_redirects=True)
+            raise
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout) as e:
+        print(f"⏳ Timeout de conexión/lectura. Detalle: {e}")
+        # 3) Un intento adicional con mayor tiempo de lectura
+        try:
+            print("🔁 Reintentando con mayor read timeout (30s)...")
+            return session.get(url, headers=headers, timeout=(connect_timeout, 30), allow_redirects=True)
+        except Exception:
+            # 4) Fallback HTTP si procede
+            if url.lower().startswith('https://'):
+                url_http = 'http://' + url[8:]
+                print(f"🌐 Probando fallback HTTP tras timeout: {url_http}")
+                return session.get(url_http, headers=headers, timeout=(connect_timeout, 30), allow_redirects=True)
+            raise
+    except requests.exceptions.ProxyError as e:
+        print(f"🧩 Error de proxy: {e}. Verifique variables de entorno/proxy corporativo.")
+        raise
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Error de solicitud: {e}")
+        raise
+
+
 # Procesar cada fila
 errores_404 = []
 exitosos = 0
 total_procesados = 0
+
+sesion = crear_sesion(reintentos=3, backoff=0.6)
 
 for index, row in df.iterrows():
     codigo_sku = str(row['CODIGO SKU']).strip()
@@ -123,7 +184,7 @@ for index, row in df.iterrows():
         print(f"🔍 Procesando SKU: {codigo_sku}")
         print(f"📍 URL: {url}")
 
-        response = requests.get(url, timeout=10, headers=headers)
+        response = descargar_con_fallback(url, headers, sesion, connect_timeout=8, read_timeout=20)
         if response.status_code == 200:
             # Obtener Content-Type del header
             content_type = response.headers.get('Content-Type', '')
