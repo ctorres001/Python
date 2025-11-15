@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para SCORING RIESGOS
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\26. Scoring Riesgos\JV_SCORING_RIESGOS_HISTORICO_01102025.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\26. Scoring Riesgos\JV_SCORING_RIESGOS_HISTORICO_01112025.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {

@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para SEGMENTACIÓN
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\25. Segmentación\SEGMENTACION_FNB_ACUMULADA_01102025.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\25. Segmentación\SEGMENTACION_FNB_ACUMULADA_01112025.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {

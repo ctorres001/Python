@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para OFFLINE
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\Historico OFFLINE\ZSDR032_OFF_LI_20250901.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\Historico OFFLINE\ZSDR032_OFF_LI_20251101.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
