@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivos por defecto
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\11. Noviembre\BD01112025\BD01112025.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\11. Noviembre\BD16112025\BD16112025.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
@@ -576,6 +576,51 @@ def limpiar_datos_sql(df):
     
     return df
 
+def verificar_espacio_sql():
+    """Verifica si hay espacio disponible en la base de datos"""
+    try:
+        conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SQL_CONFIG['server']};DATABASE={SQL_CONFIG['database']};UID={SQL_CONFIG['username']};PWD={SQL_CONFIG['password']};TrustServerCertificate=yes;"
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+        
+        # Consultar espacio disponible
+        cursor.execute("""
+            SELECT 
+                DB_NAME() as DatabaseName,
+                SUM(size) * 8 / 1024 AS SizeMB,
+                SUM(CAST(FILEPROPERTY(name, 'SpaceUsed') AS INT)) * 8 / 1024 AS UsedMB,
+                (SUM(size) - SUM(CAST(FILEPROPERTY(name, 'SpaceUsed') AS INT))) * 8 / 1024 AS FreeMB
+            FROM sys.database_files
+            WHERE type = 0
+        """)
+        
+        resultado = cursor.fetchone()
+        if resultado:
+            db_name, size_mb, used_mb, free_mb = resultado
+            print(f"\n📊 ESPACIO EN BASE DE DATOS:")
+            print(f"   Tamaño total: {size_mb:,.0f} MB")
+            print(f"   Espacio usado: {used_mb:,.0f} MB")
+            print(f"   Espacio libre: {free_mb:,.0f} MB")
+            
+            # Advertir si hay menos de 500 MB libres
+            if free_mb < 500:
+                print(f"   ⚠️  ADVERTENCIA: Poco espacio disponible ({free_mb:.0f} MB)")
+                
+            cursor.close()
+            conn.close()
+            
+            # Retornar False si hay menos de 100 MB
+            return free_mb >= 100
+        
+        cursor.close()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"⚠️  No se pudo verificar espacio disponible: {str(e)}")
+        # Continuar de todas formas
+        return True
+
 def verificar_tabla_existente(table_name):
     """Verifica si la tabla existe y consulta acción"""
     try:
@@ -678,6 +723,12 @@ def cargar_dataframe_a_sql_optimizado(df, table_name):
     print(f"   Registros: {len(df):,}")
 
     try:
+        # 0. VERIFICAR ESPACIO DISPONIBLE
+        if not verificar_espacio_sql():
+            print("❌ ERROR: No hay suficiente espacio en la base de datos")
+            print("   Contacta al administrador para liberar espacio o elimina tablas antiguas")
+            return False
+        
         # 1. Preparar DataFrame
         df_prep = preparar_dataframe_para_sql(df)
         

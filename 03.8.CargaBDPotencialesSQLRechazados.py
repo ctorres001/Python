@@ -18,7 +18,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para RECHAZADOS
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\11. Noviembre\BD01112025\BD01112025_Rechazados.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\11. Noviembre\BD16112025\BD16112025_Rechazado.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
