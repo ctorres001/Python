@@ -190,6 +190,11 @@ class SistemaReportesPorCanal:
                 base['Nro. PEDIDO VENTA'] = base['Nro. PEDIDO VENTA'].fillna(base['Nro. DE CONTRATO'])
 
 
+            # Convertir 'Nro. PEDIDO VENTA' a cadena y eliminar '.0' si existe
+            if 'Nro. PEDIDO VENTA' in base.columns:
+                base['Nro. PEDIDO VENTA'] = base['Nro. PEDIDO VENTA'].astype(str).str.replace(r'\.0$', '', regex=True)
+
+
             # Procesamiento de datos
             base['FECHA VENTA'] = pd.to_datetime(base['FECHA VENTA'], errors='coerce', dayfirst=True)
             base['SEDE'] = base['SEDE'].astype(str).str.strip().str.upper()
