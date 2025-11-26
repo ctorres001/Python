@@ -76,6 +76,7 @@ test*.py
 prueba*.py
 *_test.py
 *_prueba.py
+09.1AnalisisDatos.ipynb
 
 # =====================================
 # 📊 Datos sensibles
