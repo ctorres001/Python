@@ -44,6 +44,7 @@ MAPEO_NOMBRES_COLUMNAS = {
     "Tipo Docum": "Tipo_Docum", 
     "N.I.F.1": "N_I_F_1",
     "Int.cial.": "Int_cial",
+    "Soc.cial.": "Int_cial",
     "Nombre": "Nombre",
     "Mensaje": "Mensaje"
 }

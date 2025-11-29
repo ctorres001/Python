@@ -689,6 +689,26 @@ def preparar_dataframe_para_sql(df):
             else:
                 df_prep[col] = df_prep[col].replace([np.inf, -np.inf], None)
                 df_prep[col] = df_prep[col].where(pd.notnull(df_prep[col]), None)
+
+    # Normalización específica: asegurar que N_I_F_1 no tenga sufijo ".0" por conversión previa de float
+    if 'N_I_F_1' in df_prep.columns:
+        # Si llegó como numérico, convertirlo primero a entero (cuando aplica) y luego a texto
+        if pd.api.types.is_numeric_dtype(df_prep['N_I_F_1']):
+            try:
+                # Evitar pérdida de valores no numéricos, convertir solo números
+                serie = df_prep['N_I_F_1']
+                # Donde sea entero representado como float (x.0) lo pasamos a int
+                mask_float_int = serie.notna() & (serie == serie.astype(int))
+                serie_conv = serie.copy()
+                serie_conv[mask_float_int] = serie_conv[mask_float_int].astype(int)
+                df_prep['N_I_F_1'] = serie_conv
+            except Exception:
+                pass
+        # Convertir todo a str y limpiar terminaciones .0
+        df_prep['N_I_F_1'] = df_prep['N_I_F_1'].astype(str).str.strip()
+        df_prep['N_I_F_1'] = df_prep['N_I_F_1'].str.replace(r'\.0$', '', regex=True)
+        # Reemplazar cadenas vacías o marcadores de nulos por None
+        df_prep['N_I_F_1'] = df_prep['N_I_F_1'].replace(['', 'nan', 'NaN', 'None', 'NULL'], None)
     
     return df_prep
 
