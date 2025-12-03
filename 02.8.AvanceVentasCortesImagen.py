@@ -22,12 +22,13 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 # Clase WhatsAppSender (Playwright + Firefox)
 # ============================================================
 class WhatsAppSender:
-    def __init__(self, profile_dir="D:/FNB/Proyectos/Python/Whatsapp_Firefox"):
+    def __init__(self, profile_dir="D:/FNB/Proyectos/Python/Whatsapp_Chromium"):
         self.profile_dir = profile_dir
         self.browser = None
         self.page = None
         self.playwright = None
         self._launch_metrics = {}
+        self.use_chromium = True  # Cambiar a True para usar Chromium
 
     async def inicializar_driver(self):
         try:
@@ -37,43 +38,81 @@ class WhatsAppSender:
             self.playwright = await async_playwright().start()
             self._launch_metrics['playwright_start_s'] = round(time.time() - t0, 2)
 
-            # Verificar carpeta de perfil y limpiar locks que pueden bloquear
+            # Verificar carpeta de perfil
             perfil_path = pathlib.Path(self.profile_dir)
-            if perfil_path.exists():
-                lock_files = list(perfil_path.glob('**/lock')) + list(perfil_path.glob('**/*.lock')) + list(perfil_path.glob('**/parent.lock'))
-                for lf in lock_files:
-                    try:
-                        lf.unlink()
-                    except:
-                        pass
-            else:
+            if not perfil_path.exists():
                 perfil_path.mkdir(parents=True, exist_ok=True)
 
-            print("[2/6] Lanzando Firefox persistente (perfil existente)...")
-            t1 = time.time()
-            try:
-                self.browser = await self.playwright.firefox.launch_persistent_context(
-                    user_data_dir=self.profile_dir,
-                    headless=False,
-                    viewport={'width': 1280, 'height': 800},
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
-                )
-            except Exception as e_persist:
-                print(f"   ⚠️ Falló perfil persistente: {e_persist}\n   Intentando perfil limpio temporal...")
-                temp_profile = str(perfil_path.parent / (perfil_path.name + '_TEMP'))
-                # Limpiar si existe
+            if self.use_chromium:
+                print("[2/6] Lanzando Chromium persistente (perfil existente)...")
+                t1 = time.time()
                 try:
-                    shutil.rmtree(temp_profile, ignore_errors=True)
-                except:
-                    pass
-                self.browser = await self.playwright.firefox.launch_persistent_context(
-                    user_data_dir=temp_profile,
-                    headless=False,
-                    viewport={'width': 1280, 'height': 800},
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
-                )
-                print("   ✅ Perfil temporal iniciado")
-            self._launch_metrics['firefox_launch_s'] = round(time.time() - t1, 2)
+                    self.browser = await self.playwright.chromium.launch_persistent_context(
+                        user_data_dir=self.profile_dir,
+                        headless=False,
+                        viewport={'width': 1280, 'height': 800},
+                        args=[
+                            '--disable-blink-features=AutomationControlled',
+                            '--no-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-gpu',
+                            '--disable-software-rasterizer',
+                        ],
+                        ignore_https_errors=True
+                    )
+                    print("   ✅ Chromium iniciado correctamente")
+                except Exception as e_persist:
+                    print(f"   ⚠️ Falló perfil persistente: {e_persist}\n   Intentando perfil limpio temporal...")
+                    temp_profile = str(perfil_path.parent / (perfil_path.name + '_TEMP'))
+                    try:
+                        shutil.rmtree(temp_profile, ignore_errors=True)
+                    except:
+                        pass
+                    self.browser = await self.playwright.chromium.launch_persistent_context(
+                        user_data_dir=temp_profile,
+                        headless=False,
+                        viewport={'width': 1280, 'height': 800},
+                        args=['--disable-blink-features=AutomationControlled'],
+                        ignore_https_errors=True
+                    )
+                    print("   ✅ Perfil temporal iniciado")
+                self._launch_metrics['browser_launch_s'] = round(time.time() - t1, 2)
+            else:
+                # Código original de Firefox (por si quieres volver)
+                # Limpiar archivos de lock
+                if perfil_path.exists():
+                    lock_files = list(perfil_path.glob('**/lock')) + list(perfil_path.glob('**/*.lock'))
+                    for lf in lock_files:
+                        try:
+                            lf.unlink()
+                        except:
+                            pass
+
+                print("[2/6] Lanzando Firefox persistente (perfil existente)...")
+                t1 = time.time()
+                try:
+                    self.browser = await self.playwright.firefox.launch_persistent_context(
+                        user_data_dir=self.profile_dir,
+                        headless=False,
+                        viewport={'width': 1280, 'height': 800},
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+                        ignore_https_errors=True
+                    )
+                except Exception as e_persist:
+                    print(f"   ⚠️ Falló perfil persistente: {e_persist}")
+                    temp_profile = str(perfil_path.parent / (perfil_path.name + '_TEMP'))
+                    try:
+                        shutil.rmtree(temp_profile, ignore_errors=True)
+                    except:
+                        pass
+                    self.browser = await self.playwright.firefox.launch_persistent_context(
+                        user_data_dir=temp_profile,
+                        headless=False,
+                        viewport={'width': 1280, 'height': 800},
+                        ignore_https_errors=True
+                    )
+                    print("   ✅ Perfil temporal iniciado")
+                self._launch_metrics['browser_launch_s'] = round(time.time() - t1, 2)
 
             print("[3/6] Creando nueva página...")
             t2 = time.time()
@@ -82,7 +121,33 @@ class WhatsAppSender:
 
             print("[4/6] Navegando a WhatsApp Web...")
             t3 = time.time()
-            await self.page.goto("https://web.whatsapp.com", timeout=60000)
+            
+            # Intentar cargar WhatsApp Web con reintentos si hay error
+            max_reintentos = 3
+            for intento in range(max_reintentos):
+                try:
+                    if intento > 0:
+                        print(f"   🔄 Reintento {intento}/{max_reintentos-1}...")
+                    
+                    await self.page.goto("https://web.whatsapp.com", timeout=60000, wait_until='domcontentloaded')
+                    await asyncio.sleep(3)  # Esperar un poco para que cargue
+                    
+                    # Verificar si hay mensaje de error
+                    error_elementos = await self.page.query_selector_all('text=/error inesperado/i')
+                    if error_elementos:
+                        print(f"   ⚠️  Detectado error en WhatsApp Web, recargando...")
+                        await self.page.reload(timeout=60000, wait_until='domcontentloaded')
+                        await asyncio.sleep(3)
+                    
+                    break  # Si llegamos aquí, la navegación fue exitosa
+                    
+                except Exception as e_goto:
+                    if intento < max_reintentos - 1:
+                        print(f"   ⚠️  Error al cargar: {e_goto}, reintentando...")
+                        await asyncio.sleep(5)
+                    else:
+                        raise
+            
             self._launch_metrics['goto_whatsapp_s'] = round(time.time() - t3, 2)
 
             print("[5/6] Esperando carga inicial selectores...")
@@ -96,7 +161,7 @@ class WhatsAppSender:
             ]
 
             loaded = False
-            timeout_por_selector = 10000  # 10 segundos por selector
+            timeout_por_selector = 15000  # 15 segundos por selector (aumentado)
             
             for i, selector in enumerate(posibles_selectores, 1):
                 try:
@@ -110,14 +175,34 @@ class WhatsAppSender:
                     continue
 
             if not loaded:
-                print("[6/6] No se detectó lista de chats inicialmente, comprobando QR...")
+                print("[6/6] No se detectó lista de chats inicialmente, comprobando QR o error...")
+                
+                # Primero verificar si hay mensaje de error
+                error_elementos = await self.page.query_selector_all('text=/error/i')
+                if error_elementos and len(error_elementos) > 0:
+                    print("   ⚠️  Detectado mensaje de error en WhatsApp Web")
+                    print("   🔄 Intentando recargar la página...")
+                    await self.page.reload(timeout=60000, wait_until='domcontentloaded')
+                    await asyncio.sleep(5)
+                    
+                    # Reintentar detección de selectores después de recargar
+                    for selector in posibles_selectores:
+                        try:
+                            await self.page.wait_for_selector(selector, timeout=15000)
+                            print(f"✅ WhatsApp cargado correctamente tras recarga (detectado con: {selector})")
+                            print("⏱️ Métricas de lanzamiento:", self._launch_metrics)
+                            return True
+                        except:
+                            continue
+                
+                # Si no hay error, buscar QR
                 try:
                     qr_canvas = await self.page.query_selector("canvas")
                     if qr_canvas:
-                        print("\n⚠️  Código QR visible. Esperando escaneo (hasta 60s)...")
-                        for intento in range(12):
+                        print("\n⚠️  Código QR visible. Esperando escaneo (hasta 90s)...")
+                        for intento in range(18):  # 18 * 5 = 90 segundos
                             await asyncio.sleep(5)
-                            print(f"   - Intento {intento+1}/12")
+                            print(f"   - Intento {intento+1}/18")
                             for selector in posibles_selectores:
                                 try:
                                     await self.page.wait_for_selector(selector, timeout=2000)
@@ -127,7 +212,7 @@ class WhatsAppSender:
                                     return True
                                 except:
                                     continue
-                        raise Exception("Timeout QR: no se escaneó en 60s")
+                        raise Exception("Timeout QR: no se escaneó en 90s")
                     else:
                         raise Exception("Interfaz no reconocida (sin chats ni QR)")
                 except Exception as e_qr:
@@ -140,12 +225,17 @@ class WhatsAppSender:
 
         except Exception as e:
             print(f"\n❌ Error inicializando WhatsApp Web: {e}")
-            print("\nSugerencias:")
-            print("  1. Verifica que Firefox esté cerrado completamente")
-            print("  2. Elimina el perfil corrupto: d:/FNB/Proyectos/Python/Whatsapp_Firefox")
-            print("  3. Vuelve a escanear el código QR")
-            print("  4. Ejecuta: python -m playwright install firefox")
-            print("  5. Prueba sin perfil persistente (comentando user_data_dir)")
+            print("\n🔧 Acciones recomendadas para resolver el error:")
+            print("  1. Cierra TODOS los navegadores Firefox abiertos")
+            print("  2. Elimina el perfil (puede estar corrupto):")
+            print("     rmdir /s /q D:\\FNB\\Proyectos\\Python\\Whatsapp_Firefox")
+            print("  3. Si WhatsApp Web muestra 'error inesperado':")
+            print("     - Verifica tu conexión a internet")
+            print("     - Intenta abrir https://web.whatsapp.com manualmente en Firefox")
+            print("     - Espera unos minutos y vuelve a intentar")
+            print("  4. Asegúrate de que Playwright y Firefox estén instalados:")
+            print("     python -m playwright install firefox")
+            print("  5. Si el problema persiste, prueba desconectar otros dispositivos de WhatsApp")
             return False
 
     async def buscar_contacto(self, numero: str):
