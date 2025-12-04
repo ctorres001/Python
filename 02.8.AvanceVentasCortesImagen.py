@@ -22,13 +22,55 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 # Clase WhatsAppSender (Playwright + Firefox)
 # ============================================================
 class WhatsAppSender:
-    def __init__(self, profile_dir="D:/FNB/Proyectos/Python/Whatsapp_Chromium"):
+    def __init__(self, profile_dir="D:/FNB/Proyectos/Python/Whatsapp_Firefox"):
         self.profile_dir = profile_dir
         self.browser = None
         self.page = None
         self.playwright = None
         self._launch_metrics = {}
-        self.use_chromium = True  # Cambiar a True para usar Chromium
+        self.use_chromium = False  # Usar Firefox porque es más compatible con WhatsApp
+
+    async def _aplicar_stealth(self, page):
+        """Aplica técnicas anti-detección a la página"""
+        await page.add_init_script("""
+            // Sobrescribir la propiedad navigator.webdriver
+            delete Object.getPrototypeOf(navigator).webdriver;
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false,
+                configurable: true
+            });
+            
+            // Para Chrome/Chromium
+            if (window.chrome) {
+                window.chrome = {
+                    runtime: {}
+                };
+            }
+            
+            // Sobrescribir permisos
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+            
+            // Plugins - más realista para Firefox
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [
+                    {name: 'PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer'},
+                    {name: 'Chrome PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer'},
+                    {name: 'Chromium PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer'},
+                    {name: 'Microsoft Edge PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer'},
+                    {name: 'WebKit built-in PDF', description: 'Portable Document Format', filename: 'internal-pdf-viewer'}
+                ]
+            });
+            
+            // Languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['es-ES', 'es', 'en-US', 'en']
+            });
+        """)
 
     async def inicializar_driver(self):
         try:
@@ -53,12 +95,29 @@ class WhatsAppSender:
                         viewport={'width': 1280, 'height': 800},
                         args=[
                             '--disable-blink-features=AutomationControlled',
+                            '--exclude-switches=enable-automation',
+                            '--disable-infobars',
                             '--no-sandbox',
                             '--disable-dev-shm-usage',
-                            '--disable-gpu',
-                            '--disable-software-rasterizer',
+                            '--disable-web-security',
+                            '--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor',
+                            '--disable-setuid-sandbox',
+                            '--no-first-run',
+                            '--no-default-browser-check',
+                            '--no-service-autorun',
+                            '--password-store=basic',
+                            '--use-mock-keychain',
+                            '--window-position=0,0',
+                            '--ignore-certificate-errors',
+                            '--ignore-certificate-errors-spki-list',
+                            '--disable-popup-blocking',
+                            '--disable-extensions-except',
+                            '--disable-component-extensions-with-background-pages',
                         ],
-                        ignore_https_errors=True
+                        ignore_https_errors=True,
+                        ignore_default_args=['--enable-automation'],
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        bypass_csp=True
                     )
                     print("   ✅ Chromium iniciado correctamente")
                 except Exception as e_persist:
@@ -90,16 +149,33 @@ class WhatsAppSender:
 
                 print("[2/6] Lanzando Firefox persistente (perfil existente)...")
                 t1 = time.time()
+                
+                # Configuración de preferencias de Firefox
+                firefox_prefs = {
+                    'dom.webdriver.enabled': False,
+                    'useAutomationExtension': False,
+                    'dom.indexedDB.experimental': True,
+                    'dom.indexedDB.logging.enabled': False,
+                    'browser.cache.disk.enable': True,
+                    'browser.cache.memory.enable': True,
+                }
+                
                 try:
                     self.browser = await self.playwright.firefox.launch_persistent_context(
                         user_data_dir=self.profile_dir,
                         headless=False,
                         viewport={'width': 1280, 'height': 800},
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-                        ignore_https_errors=True
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+                        ignore_https_errors=True,
+                        accept_downloads=True,
+                        locale='es-ES',
+                        timezone_id='America/Lima',
+                        firefox_user_prefs=firefox_prefs
                     )
+                    print("   ✅ Firefox iniciado con perfil existente")
                 except Exception as e_persist:
                     print(f"   ⚠️ Falló perfil persistente: {e_persist}")
+                    print(f"   🔄 Intentando con perfil limpio...")
                     temp_profile = str(perfil_path.parent / (perfil_path.name + '_TEMP'))
                     try:
                         shutil.rmtree(temp_profile, ignore_errors=True)
@@ -109,7 +185,9 @@ class WhatsAppSender:
                         user_data_dir=temp_profile,
                         headless=False,
                         viewport={'width': 1280, 'height': 800},
-                        ignore_https_errors=True
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+                        ignore_https_errors=True,
+                        firefox_user_prefs=firefox_prefs
                     )
                     print("   ✅ Perfil temporal iniciado")
                 self._launch_metrics['browser_launch_s'] = round(time.time() - t1, 2)
@@ -118,6 +196,10 @@ class WhatsAppSender:
             t2 = time.time()
             self.page = await self.browser.new_page()
             self._launch_metrics['new_page_s'] = round(time.time() - t2, 2)
+            
+            # Aplicar stealth scripts
+            print("[3.5/6] Aplicando técnicas anti-detección...")
+            await self._aplicar_stealth(self.page)
 
             print("[4/6] Navegando a WhatsApp Web...")
             t3 = time.time()
@@ -128,11 +210,33 @@ class WhatsAppSender:
                 try:
                     if intento > 0:
                         print(f"   🔄 Reintento {intento}/{max_reintentos-1}...")
+                        # Limpiar storage antes de reintentar
+                        await self.page.evaluate("""() => {
+                            localStorage.clear();
+                            sessionStorage.clear();
+                        }""")
+                        await asyncio.sleep(2)
                     
                     await self.page.goto("https://web.whatsapp.com", timeout=60000, wait_until='domcontentloaded')
-                    await asyncio.sleep(3)  # Esperar un poco para que cargue
+                    await asyncio.sleep(5)  # Esperar más tiempo para que cargue completamente
                     
-                    # Verificar si hay mensaje de error
+                    # Verificar si hay error de base de datos
+                    error_db = await self.page.query_selector_all('text=/error en la base de datos/i')
+                    if error_db:
+                        print(f"   ⚠️  Error de base de datos detectado, limpiando y recargando...")
+                        # Limpiar toda la data de WhatsApp
+                        await self.page.evaluate("""() => {
+                            indexedDB.databases().then(dbs => {
+                                dbs.forEach(db => indexedDB.deleteDatabase(db.name));
+                            });
+                            localStorage.clear();
+                            sessionStorage.clear();
+                        }""")
+                        await asyncio.sleep(2)
+                        await self.page.reload(timeout=60000, wait_until='domcontentloaded')
+                        await asyncio.sleep(5)
+                    
+                    # Verificar si hay mensaje de error genérico
                     error_elementos = await self.page.query_selector_all('text=/error inesperado/i')
                     if error_elementos:
                         print(f"   ⚠️  Detectado error en WhatsApp Web, recargando...")
@@ -152,6 +256,10 @@ class WhatsAppSender:
 
             print("[5/6] Esperando carga inicial selectores...")
 
+            # Primero verificar si hay logout o error
+            await asyncio.sleep(5)
+            url_actual = self.page.url
+            
             # Lista de posibles selectores para detectar que ya cargó
             posibles_selectores = [
                 "[data-testid='chat-list']",
@@ -161,63 +269,97 @@ class WhatsAppSender:
             ]
 
             loaded = False
-            timeout_por_selector = 15000  # 15 segundos por selector (aumentado)
+            timeout_por_selector = 10000  # 10 segundos por selector
             
+            # Intentar detectar si ya está logueado
             for i, selector in enumerate(posibles_selectores, 1):
                 try:
-                    print(f"   Intentando selector {i}/{len(posibles_selectores)}: {selector}")
                     await self.page.wait_for_selector(selector, timeout=timeout_por_selector)
-                    print(f"✅ WhatsApp cargado correctamente (detectado con: {selector})")
+                    print(f"✅ Sesión detectada con: {selector}")
                     loaded = True
                     break
                 except Exception as e_selector:
-                    print(f"   ⏭️  Selector no encontrado, probando siguiente...")
                     continue
 
-            if not loaded:
-                print("[6/6] No se detectó lista de chats inicialmente, comprobando QR o error...")
+            # SIEMPRE mostrar mensaje de confirmación y esperar verificación
+            print("\n" + "="*70)
+            print("📱 VERIFICACIÓN DE VINCULACIÓN")
+            print("="*70)
+            
+            if loaded:
+                print("\n✅ Se detectó una sesión activa de WhatsApp Web")
+                print("\n🔍 ACCIÓN REQUERIDA:")
+                print("   1. Revisa la ventana de Firefox que se abrió")
+                print("   2. VERIFICA que puedes ver tus chats de WhatsApp")
+                print("   3. Si NO ves tus chats:")
+                print("      • Escanea el código QR con tu teléfono")
+                print("      • Marca 'Mantener sesión iniciada'")
+                print("\n⏳ Esperando 10 segundos para que verifiques...")
+                print("   (Si ves tus chats, el script continuará automáticamente)\n")
                 
-                # Primero verificar si hay mensaje de error
-                error_elementos = await self.page.query_selector_all('text=/error/i')
-                if error_elementos and len(error_elementos) > 0:
-                    print("   ⚠️  Detectado mensaje de error en WhatsApp Web")
-                    print("   🔄 Intentando recargar la página...")
-                    await self.page.reload(timeout=60000, wait_until='domcontentloaded')
+                # Esperar 10 segundos y verificar que la sesión sigue activa
+                await asyncio.sleep(10)
+                
+                # Verificar nuevamente que la sesión está activa
+                sesion_verificada = False
+                for selector in posibles_selectores:
+                    try:
+                        await self.page.wait_for_selector(selector, timeout=3000)
+                        sesion_verificada = True
+                        break
+                    except:
+                        continue
+                
+                if sesion_verificada:
+                    print("✅ Sesión verificada correctamente\n")
+                else:
+                    print("⚠️ Se perdió la sesión, esperando nueva vinculación...\n")
+                    loaded = False
+            
+            if not loaded:
+                print("\n🔍 Verifica la ventana de Firefox que se abrió:")
+                print("   1. Si ves un código QR:")
+                print("      • Abre WhatsApp en tu teléfono")
+                print("      • Ve a: Configuración → Dispositivos vinculados")
+                print("      • Toca 'Vincular un dispositivo'")
+                print("      • Escanea el código QR")
+                print("      • ✅ MARCA la casilla 'Mantener sesión iniciada'")
+                print("\n   2. Si ves un mensaje de error:")
+                print("      • Intenta recargar la página (F5)")
+                print("      • Espera a que aparezca el código QR")
+                print("\n   3. Si ya ves tus chats de WhatsApp:")
+                print("      • Perfecto, ya estás vinculado")
+                print("\n" + "="*70)
+                print("\n⏳ Esperando vinculación...")
+                print("   El script verificará automáticamente cada 5 segundos.")
+                print("   Presiona Ctrl+C si deseas cancelar.\n")
+                
+                # Esperar hasta 5 minutos (60 intentos de 5 segundos)
+                for intento in range(60):
                     await asyncio.sleep(5)
                     
-                    # Reintentar detección de selectores después de recargar
+                    # Verificar si ya se logueó
                     for selector in posibles_selectores:
                         try:
-                            await self.page.wait_for_selector(selector, timeout=15000)
-                            print(f"✅ WhatsApp cargado correctamente tras recarga (detectado con: {selector})")
-                            print("⏱️ Métricas de lanzamiento:", self._launch_metrics)
-                            return True
+                            await self.page.wait_for_selector(selector, timeout=2000)
+                            print(f"\n✅ ¡Sesión activa detectada!")
+                            print(f"   Tiempo de espera: {(intento+1)*5} segundos")
+                            loaded = True
+                            break
                         except:
                             continue
+                    
+                    if loaded:
+                        break
+                    
+                    # Mostrar progreso cada 10 segundos
+                    if (intento + 1) % 2 == 0:
+                        tiempo_transcurrido = (intento + 1) * 5
+                        print(f"   ⏱️  Esperando... ({tiempo_transcurrido}s / 300s)")
                 
-                # Si no hay error, buscar QR
-                try:
-                    qr_canvas = await self.page.query_selector("canvas")
-                    if qr_canvas:
-                        print("\n⚠️  Código QR visible. Esperando escaneo (hasta 90s)...")
-                        for intento in range(18):  # 18 * 5 = 90 segundos
-                            await asyncio.sleep(5)
-                            print(f"   - Intento {intento+1}/18")
-                            for selector in posibles_selectores:
-                                try:
-                                    await self.page.wait_for_selector(selector, timeout=2000)
-                                    print("✅ Sesión iniciada tras escaneo QR")
-                                    self._launch_metrics['qr_wait_s'] = (intento+1)*5
-                                    print("⏱️ Métricas de lanzamiento:", self._launch_metrics)
-                                    return True
-                                except:
-                                    continue
-                        raise Exception("Timeout QR: no se escaneó en 90s")
-                    else:
-                        raise Exception("Interfaz no reconocida (sin chats ni QR)")
-                except Exception as e_qr:
-                    print(f"   ❌ {e_qr}")
-                    print("⏱️ Métricas de lanzamiento:", self._launch_metrics)
+                if not loaded:
+                    print("\n❌ Timeout: No se detectó sesión activa después de 5 minutos")
+                    print("   Ejecuta el script nuevamente cuando estés listo.")
                     return False
 
             print("✅ WhatsApp cargado. ⏱️ Métricas de lanzamiento:", self._launch_metrics)
@@ -241,20 +383,65 @@ class WhatsAppSender:
     async def buscar_contacto(self, numero: str):
         """Abre el chat del número usando URL directa"""
         try:
+            # Verificar que no estemos en logout
+            url_actual = self.page.url
+            if 'post_logout' in url_actual or 'logout_reason' in url_actual:
+                print(f"   ⚠️ La sesión de WhatsApp fue cerrada, no se puede continuar")
+                print(f"   💡 Solución: Ejecuta el script nuevamente y escanea el código QR")
+                return False
+            
             url = f"https://web.whatsapp.com/send?phone={numero.replace('+','').replace(' ','')}"
             print(f"   🔍 Buscando contacto: {numero}")
             
-            await self.page.goto(url, timeout=30000)
-            await asyncio.sleep(2)  # Esperar que cargue el chat
+            await self.page.goto(url, timeout=40000, wait_until='domcontentloaded')
+            await asyncio.sleep(5)  # Esperar más tiempo para que cargue el chat
+            
+            # Verificar nuevamente si hubo logout después del goto
+            url_actual = self.page.url
+            if 'post_logout' in url_actual or 'logout_reason' in url_actual:
+                print(f"   ⚠️ WhatsApp cerró la sesión al intentar abrir el chat")
+                print(f"   💡 Esto indica que la sesión no está vinculada correctamente")
+                return False
 
-            # Esperar a que cargue el chat: buscamos el input de mensajes
+            # Esperar a que cargue el chat: probamos múltiples selectores
             print(f"   ⏳ Esperando que abra el chat...")
-            await self.page.wait_for_selector("footer div[contenteditable='true']", timeout=15000)
-            print(f"   ✅ Chat abierto correctamente")
+            selectores_chat = [
+                "footer div[contenteditable='true']",  # Input de mensajes
+                "[data-testid='conversation-compose-box-input']",  # Alternativa 1
+                "div[contenteditable='true'][data-tab='10']",  # Alternativa 2
+                "div[role='textbox']"  # Alternativa 3
+            ]
+            
+            chat_abierto = False
+            for selector in selectores_chat:
+                try:
+                    await self.page.wait_for_selector(selector, timeout=8000)
+                    print(f"   ✅ Chat abierto correctamente")
+                    chat_abierto = True
+                    break
+                except:
+                    continue
+            
+            if not chat_abierto:
+                # Último intento: verificar si el número es válido buscando mensaje de error
+                numero_invalido = await self.page.query_selector_all('text=/número de teléfono/i')
+                if numero_invalido:
+                    print(f"   ❌ El número {numero} no existe o es inválido")
+                    return False
+                else:
+                    print(f"   ⚠️ No se pudo detectar el cuadro de texto del chat")
+                    return False
+            
             return True
         except Exception as e:
             print(f"   ❌ Error abriendo chat: {e}")
-            print(f"   Posibles causas: número inválido, conexión lenta, o WhatsApp Web no respondió")
+            url_actual = self.page.url
+            if 'post_logout' in url_actual:
+                print(f"   🔍 URL actual: {url_actual}")
+                print(f"   ⚠️ La sesión fue cerrada por WhatsApp")
+                print(f"   💡 Necesitas vincular el dispositivo escaneando el código QR")
+            else:
+                print(f"   Posibles causas: número inválido, conexión lenta, o WhatsApp Web no respondió")
             return False
 
 
@@ -1391,6 +1578,19 @@ class SalesImageGenerator:
             return False
         
         print("✅ WhatsApp Web inicializado correctamente\n")
+        
+        # Verificación simple de que estamos en WhatsApp
+        print("🔍 Verificando que WhatsApp Web esté listo...")
+        await asyncio.sleep(3)
+        
+        # Verificar que podemos interactuar con la página
+        try:
+            # Buscar elemento principal de WhatsApp
+            await whatsapp.page.wait_for_selector("[data-testid='chat-list'], canvas", timeout=5000)
+            print("✅ WhatsApp Web listo para enviar mensajes\n")
+        except:
+            print("⚠️ No se pudo verificar el estado de WhatsApp Web")
+            print("   Intentando continuar de todas formas...\n")
         
         try:
             # NUEVO: Determinar saludo según la hora actual
