@@ -1,21 +1,17 @@
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Script para INICIAR PostgreSQL
-comando = r"D:\\FNB\\Proyectos\\PostgreSQL\\postgresql-18.1-1-windows-x64-binaries\\pgsql\\bin\\pg_ctl.exe"
-data_dir = r"D:\\FNB\\Proyectos\\PostgreSQL\\data"
-logfile = r"D:\\FNB\\Proyectos\\PostgreSQL\\logfile.log"
-
-def ensure_logfile(path: str) -> None:
-    """Crea el archivo de log si no existe para evitar bloqueos por ruta inválida."""
-    log_path = Path(path)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    if not log_path.exists():
-        log_path.touch()
+comando = r"D:\FNB\Proyectos\PostgreSQL\postgresql-18.1-1-windows-x64-binaries\pgsql\bin\pg_ctl.exe"
+data_dir = r"D:\FNB\Proyectos\PostgreSQL\data"
+logfile = r"D:\FNB\Proyectos\PostgreSQL\logfile.log"
 
 try:
-    ensure_logfile(logfile)
+    # Crear log si no existe
+    Path(logfile).parent.mkdir(parents=True, exist_ok=True)
+    Path(logfile).touch(exist_ok=True)
 
     # Verificar si ya está corriendo
     print("Verificando estado de PostgreSQL...")
@@ -23,7 +19,8 @@ try:
         [comando, "-D", data_dir, "status"],
         capture_output=True,
         text=True,
-        timeout=5
+        timeout=3,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
     )
 
     if status.returncode == 0:
@@ -31,49 +28,34 @@ try:
         print(status.stdout.strip())
         sys.exit(0)
 
-    # Si no está corriendo, iniciarlo con espera corta
-    print("Iniciando PostgreSQL...")
-    result = subprocess.run(
-        [
-            comando,
-            "-D", data_dir,
-            "-l", logfile,
-            "-w",  # espera a que arranque
-            "-t", "5",  # timeout de 5s en pg_ctl
-            "start",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15
+    # Iniciar en segundo plano sin esperar
+    print("Iniciando PostgreSQL en segundo plano...")
+    subprocess.Popen(
+        [comando, "-D", data_dir, "-l", logfile, "start"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
     )
 
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    if result.stderr.strip():
-        print(result.stderr.strip())
-
-    # Considerar éxito si returncode es 0 o el mensaje indica que ya estaba corriendo
-    if result.returncode == 0 or "already running" in result.stderr.lower() or "server started" in result.stdout.lower():
-        print("✓ PostgreSQL iniciado correctamente")
-    else:
-        print("✗ Error al iniciar")
-        sys.exit(1)
-
-    # Verificar estado final
-    final_status = subprocess.run(
+    # Esperar 3 segundos y verificar
+    print("Esperando 3 segundos...")
+    time.sleep(3)
+    
+    final = subprocess.run(
         [comando, "-D", data_dir, "status"],
         capture_output=True,
         text=True,
-        timeout=5
+        timeout=3,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
     )
-    if final_status.returncode == 0:
-        print(final_status.stdout.strip())
+    
+    if final.returncode == 0:
+        print("✓ PostgreSQL iniciado correctamente")
+        print(final.stdout.strip())
     else:
-        print("⚠ No se pudo confirmar el estado final")
-        print(final_status.stderr.strip())
+        print("⚠ PostgreSQL iniciándose... verifica en unos segundos")
+        print(f"Revisa: {logfile}")
 
-except subprocess.TimeoutExpired:
-    print("✓ PostgreSQL iniciado (timeout local, pero pg_ctl sigue)")
 except Exception as e:
     print(f"✗ Error: {e}")
     sys.exit(1)
