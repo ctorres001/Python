@@ -98,6 +98,15 @@ MAPEO_NOMBRES_COLUMNAS = {
     "Dirección4": "direccion_4",
     "NSE 4": "nse_4",
     "FechaAlta4": "fechaalta4",
+    "Cta.Ctto 5": "cta_ctto_5",
+    "Distrito 5": "distrito_5",
+    "Dirección 5": "direccion_5",
+    "Dirección5": "direccion_5",
+    "NSE 5": "nse_5",
+    "FechaAlta5": "fechaalta5",
+    "CaCta": "cacta",
+    "Texto categ.cuenta": "texto_categ_cuenta"
+}
 
 def crear_tabla_bd_potenciales(cursor, table_name):
     """Crea la tabla bd_potenciales si no existe"""
@@ -143,16 +152,6 @@ def crear_tabla_bd_potenciales(cursor, table_name):
     """
     cursor.execute(create_table_sql)
     print(f"✅ Tabla {table_name} verificada/creada")
-
-    "Cta.Ctto 5": "cta_ctto_5",
-    "Distrito 5": "distrito_5",
-    "Dirección 5": "direccion_5",
-    "Dirección5": "direccion_5",
-    "NSE 5": "nse_5",
-    "FechaAlta5": "fechaalta5",
-    "CaCta": "cacta",
-    "Texto categ.cuenta": "texto_categ_cuenta"
-}
 
 # ======================
 # FUNCIONES DE LIMPIEZA DE ARCHIVOS TXT
