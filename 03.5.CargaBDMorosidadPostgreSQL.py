@@ -3,13 +3,24 @@ import psycopg2
 from psycopg2 import extras
 from sqlalchemy import create_engine
 import numpy as np
+import os
+import re
+import sys
 
 # ======================
-# Parámetros
+# Parámetros dinámicos
 # ======================
-excel_path = r"D:\FNB\Reportes\06 Reporte de Morosidad\01. Archivos Cartera\2025-09.xlsx"
+# Si se pasa argumento, usarlo; si no, usar ruta por defecto
+if len(sys.argv) > 1:
+    excel_path = sys.argv[1]
+else:
+    excel_path = input("Ingrese la ruta del archivo Excel: ").strip().strip('"')
+
 sheet_name = "BASE"
 csv_path = r"D:\FNB\Reportes\06 Reporte de Morosidad\Reporte_Cartera.csv"
+
+# Nombre de tabla se genera automáticamente
+table_name = None
 
 # Configuración PostgreSQL
 db_config = {
@@ -19,8 +30,6 @@ db_config = {
     "user": "postgres",
     "password": "ibr2025"
 }
-
-table_name = "bd_morosidad_202509"
 
 # Mapeo esperado PostgreSQL (tipos de datos ajustados)
 column_types_postgresql = {
@@ -54,8 +63,26 @@ column_mapping = {
     "CARTERA <360 $": "cartera_menor_360_dolares",
 }
 
+def verificar_tabla_existe(cursor, table_name):
+    """Verifica si la tabla ya existe en la base de datos"""
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = %s
+        )
+    """, (table_name,))
+    return cursor.fetchone()[0]
+
 def crear_tabla_bd_morosidad(cursor, table_name):
     """Crea la tabla bd_morosidad si no existe"""
+    existe = verificar_tabla_existe(cursor, table_name)
+    
+    if existe:
+        print(f"ℹ️  La tabla {table_name} ya existe")
+    else:
+        print(f"🔨 Creando nueva tabla {table_name}...")
+        
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
         cta_contr BIGINT,
@@ -73,12 +100,42 @@ def crear_tabla_bd_morosidad(cursor, table_name):
     )
     """
     cursor.execute(create_table_sql)
-    print(f"✅ Tabla {table_name} verificada/creada")
+    
+    if not existe:
+        print(f"✅ Tabla {table_name} creada exitosamente")
+    else:
+        print(f"✅ Tabla {table_name} lista para usar")
+
+def extraer_nombre_tabla(ruta_archivo):
+    """Extrae el nombre de la tabla del nombre del archivo"""
+    nombre_archivo = os.path.basename(ruta_archivo)
+    match = re.search(r'(\d{4})-(\d{2})', nombre_archivo)
+    if match:
+        año = match.group(1)
+        mes = match.group(2)
+        tabla = f"bd_morosidad_{año}{mes}"
+        print(f"\n📋 Archivo detectado: {nombre_archivo}")
+        print(f"📊 Tabla generada automáticamente: {tabla}")
+        return tabla
+    else:
+        raise ValueError(f"❌ No se pudo extraer año-mes del archivo: {nombre_archivo}")
+
+# ======================
+# Verificar que el archivo existe
+# ======================
+if not os.path.exists(excel_path):
+    print(f"❌ Error: El archivo no existe: {excel_path}")
+    sys.exit(1)
+
+# ======================
+# Extraer nombre de tabla
+# ======================
+table_name = extraer_nombre_tabla(excel_path)
 
 # ======================
 # Leer Excel
 # ======================
-print("Leyendo Excel...")
+print("\n📖 Leyendo Excel...")
 df = pd.read_excel(excel_path, sheet_name=sheet_name, usecols=list(column_mapping.keys()), dtype=str)
 
 # Renombrar columnas a formato PostgreSQL
@@ -104,7 +161,7 @@ for col in df.columns:
 # ======================
 # Reemplazar caracteres conflictivos
 # ======================
-print("\nLimpiando caracteres conflictivos...")
+print("\n🧹 Limpiando caracteres conflictivos...")
 for col in df.select_dtypes(include="object").columns:
     df[col] = df[col].str.replace("¬", "-", regex=False)
 
@@ -114,13 +171,13 @@ df = df.astype(object).where(pd.notnull(df), None)
 # ======================
 # Exportar a CSV temporal
 # ======================
-print("\nExportando a CSV intermedio...")
+print("\n💾 Exportando a CSV intermedio...")
 df.to_csv(csv_path, index=False, sep="|", encoding="utf-8")
 
 # ======================
 # Conexión a PostgreSQL
 # ======================
-print("\nConectando a PostgreSQL...")
+print("\n🔌 Conectando a PostgreSQL...")
 conn = psycopg2.connect(**db_config)
 cursor = conn.cursor()
 
@@ -129,7 +186,7 @@ crear_tabla_bd_morosidad(cursor, table_name)
 conn.commit()
 
 # Preguntar si truncar
-truncate = input("¿Desea truncar la tabla antes de cargar los datos? (s/n): ").lower() == "s"
+truncate = input("\n¿Desea truncar la tabla antes de cargar los datos? (s/n): ").lower() == "s"
 if truncate:
     cursor.execute(f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE")
     conn.commit()
@@ -138,7 +195,7 @@ if truncate:
 # ======================
 # Cargar datos en lotes usando execute_values
 # ======================
-print("\nCargando datos a PostgreSQL...")
+print("\n⬆️  Cargando datos a PostgreSQL...")
 sql_columns = list(column_types_postgresql.keys())
 insert_sql = f"INSERT INTO {table_name} ({', '.join(sql_columns)}) VALUES %s"
 
@@ -158,3 +215,5 @@ cursor.close()
 conn.close()
 
 print("\n✅ Proceso completado con éxito")
+print(f"📊 Tabla cargada: {table_name}")
+print(f"📁 Archivo procesado: {excel_path}")
