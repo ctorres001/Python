@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para RECHAZADOS
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\11. Noviembre\BD16112025\BD16112025_Rechazado.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\2025\12. Diciembre\BD01122025_Rechazado.txt"
 
 # Conexión PostgreSQL
 PG_CONFIG = {
@@ -52,14 +52,12 @@ def crear_tabla_bd_potenciales_rechazados(cursor, table_name):
     """Crea la tabla bd_potenciales_rechazado si no existe"""
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
-        id SERIAL PRIMARY KEY,
         fecha_eval TIMESTAMP,
         tipo_docum VARCHAR(500),
         n_i_f_1 VARCHAR(20),
         int_cial BIGINT,
         nombre VARCHAR(500),
-        mensaje VARCHAR(500),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        mensaje VARCHAR(500)
     )
     """
     cursor.execute(create_table_sql)

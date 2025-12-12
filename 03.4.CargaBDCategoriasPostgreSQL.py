@@ -19,7 +19,6 @@ def crear_tabla_bd_categorias(cursor):
     """Crea la tabla bd_categorias si no existe"""
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS bd_categorias (
-        id SERIAL PRIMARY KEY,
         f_registro TIMESTAMP,
         f_entrega TIMESTAMP,
         cuenta_contrato BIGINT,
@@ -40,8 +39,7 @@ def crear_tabla_bd_categorias(cursor):
         canal VARCHAR(100),
         tc NUMERIC(10, 4),
         colocacion_usd NUMERIC(18, 2),
-        concatenar VARCHAR(500),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        concatenar VARCHAR(500)
     )
     """
     cursor.execute(create_table_sql)

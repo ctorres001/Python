@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para SEGMENTACIÓN
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\25. Segmentación\SEGMENTACION_FNB_ACUMULADA_01112025.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\25. Segmentación\SEGMENTACION_FNB_ACUMULADA_01122025.txt"
 
 # Conexión PostgreSQL
 PG_CONFIG = {
@@ -46,12 +46,10 @@ def crear_tabla_bd_segmentacion(cursor, table_name):
     """Crea la tabla bd_segmentacion_historica si no existe"""
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
-        id SERIAL PRIMARY KEY,
         interlocutor BIGINT,
         flag_segmentacion VARCHAR(500),
         fecha_corte TIMESTAMP,
-        cta_contr BIGINT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        cta_contr BIGINT
     )
     """
     cursor.execute(create_table_sql)

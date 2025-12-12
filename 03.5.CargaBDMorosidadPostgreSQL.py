@@ -58,7 +58,6 @@ def crear_tabla_bd_morosidad(cursor, table_name):
     """Crea la tabla bd_morosidad si no existe"""
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
-        id SERIAL PRIMARY KEY,
         cta_contr BIGINT,
         tipo_cliente VARCHAR(500),
         segmento VARCHAR(500),
@@ -70,8 +69,7 @@ def crear_tabla_bd_morosidad(cursor, table_name):
         deuda_90_360_soles NUMERIC(18,2),
         cartera_menor_360_soles NUMERIC(18,2),
         deuda_90_360_dolares NUMERIC(18,2),
-        cartera_menor_360_dolares NUMERIC(18,2),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        cartera_menor_360_dolares NUMERIC(18,2)
     )
     """
     cursor.execute(create_table_sql)

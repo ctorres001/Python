@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 # ======================
 
 # Archivo por defecto para SCORING RIESGOS
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\26. Scoring Riesgos\JV_SCORING_RIESGOS_HISTORICO_01112025.txt"
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\26. Scoring Riesgos\JV_SCORING_RIESGOS_HISTORICO_01122025.txt"
 
 # Conexión PostgreSQL
 PG_CONFIG = {
@@ -50,14 +50,12 @@ def crear_tabla_bd_scoring(cursor, table_name):
     """Crea la tabla bd_scoring_historico si no existe"""
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
-        id SERIAL PRIMARY KEY,
         periodo TIMESTAMP,
         cta_contr BIGINT,
         dni VARCHAR(20),
         segmento_riesgo VARCHAR(500),
         interlocutor BIGINT,
-        flag_segmento_corregido VARCHAR(500),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        flag_segmento_corregido VARCHAR(500)
     )
     """
     cursor.execute(create_table_sql)

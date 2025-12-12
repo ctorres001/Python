@@ -20,15 +20,33 @@ def crear_tabla_bd_estados_rechazo(cursor):
     """Crea la tabla bd_potenciales_estados_rechazo si no existe"""
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS bd_potenciales_estados_rechazo (
-        id SERIAL PRIMARY KEY,
         motivo VARCHAR(500) NOT NULL,
         motivo_agrupado VARCHAR(500) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(motivo, motivo_agrupado)
+        UNIQUE (motivo, motivo_agrupado)
     )
     """
     cursor.execute(create_table_sql)
     print("✅ Tabla bd_potenciales_estados_rechazo verificada/creada")
+
+def asegurar_indice_unico(conn):
+    """Asegura que exista un índice/constraint único para (motivo, motivo_agrupado)."""
+    try:
+        cursor = conn.cursor()
+        # Un índice único permite que ON CONFLICT (motivo, motivo_agrupado) funcione
+        cursor.execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_{table_name}_motivo_motivo_agrupado
+            ON {table_name} (motivo, motivo_agrupado)
+            """
+        )
+        conn.commit()
+        cursor.close()
+        print("✓ Índice único verificado/creado")
+        return True
+    except Exception as e:
+        print(f"✗ Error al crear/verificar índice único: {e}")
+        conn.rollback()
+        return False
 
 def crear_conexion():
     """Crea y retorna la conexión a PostgreSQL"""
@@ -207,6 +225,12 @@ def main():
             return
     else:
         print(f"✓ La tabla '{table_name}' ya existe")
+
+    # Asegurar índice único requerido por ON CONFLICT
+    if not asegurar_indice_unico(conn):
+        print("\n✗ Proceso finalizado con errores (índice único)")
+        conn.close()
+        return
     
     # Paso 4: Carga incremental
     print("\n[4/4] Realizando carga incremental...")

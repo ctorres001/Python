@@ -19,7 +19,6 @@ def crear_tabla_bd_colocaciones(cursor):
     """Crea la tabla bd_colocaciones si no existe"""
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS bd_colocaciones (
-        id SERIAL PRIMARY KEY,
         f_registro TIMESTAMP,
         f_entrega TIMESTAMP,
         cuenta_contrato BIGINT,
@@ -75,8 +74,7 @@ def crear_tabla_bd_colocaciones(cursor):
         colocacion_usd NUMERIC(18, 2),
         financiamiento_usd NUMERIC(18, 2),
         fee_usd NUMERIC(18, 2),
-        fee_sin_igv_usd NUMERIC(18, 2),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        fee_sin_igv_usd NUMERIC(18, 2)
     )
     """
     cursor.execute(create_table_sql)
