@@ -187,8 +187,14 @@ def cargar_excel_a_postgresql():
 
         # Limpiar strings
         def limpiar_texto(x):
-            if pd.isna(x): return None
-            s = str(x).strip()
+            if pd.isna(x):
+                return None
+            s = str(x)
+            # Reemplazar punto y coma por espacio y normalizar espacios múltiples
+            s = s.replace(";", " ")
+            s = " ".join(s.split())
+            s = s.strip()
+            # Tratar valores tipo 'nan', 'none', 'null' como nulos
             return s if s and s.lower() not in ("nan", "none", "null") else None
 
         string_columns = [c for c in sql_columns if c not in date_columns + int_columns + decimal_columns]
