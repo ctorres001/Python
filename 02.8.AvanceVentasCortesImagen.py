@@ -1558,8 +1558,9 @@ class SalesImageGenerator:
         
         # Modificar para agregar más numeros
         numeros_destino = [
-            '51976650091',
-            '51940193512'
+            #'51976650091', #Stefany
+            '51981023234', #Denisse
+            '51940193512' #Chema
         ]
 
         #numeros_destino = ['51962344604']
