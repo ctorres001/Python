@@ -1596,7 +1596,7 @@ class SalesImageGenerator:
             # NUEVO: Determinar saludo según la hora actual
             hora_actual = datetime.now().time()
             if hora_actual < dt_time(12, 0):  # Antes de las 12:00:00
-                saludo = "Jueves 1.01"
+                saludo = "Buenos días, se brinda el comparativo de ventas:"
             else:  # A partir de las 12:00:00
                 saludo = "Buenas tardes, se brinda el comparativo de ventas:"
             
