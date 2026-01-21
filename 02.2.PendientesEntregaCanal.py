@@ -119,6 +119,7 @@ class SistemaReportesPorCanal:
             worksheet.set_column(i, i, min(column_len + 2, 50))
 
     def calcular_dias_habiles(self, fecha_venta, feriados):
+        """Calcula días hábiles desde fecha de venta hasta hoy"""
         if pd.isna(fecha_venta):
             return 0
         hoy = datetime.now().date()
@@ -127,8 +128,8 @@ class SistemaReportesPorCanal:
         if fecha_venta > hoy:
             return 0
         dias_totales = pd.date_range(fecha_venta, hoy, freq='D')
-        # lunes(0) a sábado(5) como hábil según tu lógica original
-        dias_habiles = [d for d in dias_totales if d.weekday() < 6 and d.date() not in feriados]
+        # Se excluyen solo domingos (weekday=6) y feriados, los sábados sí se cuentan
+        dias_habiles = [d for d in dias_totales if d.weekday() != 6 and d.date() not in feriados]
         return max(len(dias_habiles) - 1, 0)
 
     # --- Reemplazo global de etiquetas HTML por <br> y '-' para viñetas ---
@@ -212,7 +213,7 @@ class SistemaReportesPorCanal:
 
                 # Retail general para Conecta e Integra desde 01/02/2024
                 if row['FECHA VENTA'] >= pd.Timestamp(2024, 2, 1) and row['RESPONSABLE DE VENTA'] in [
-                    "CONECTA RETAIL S.A.", "INTEGRA RETAIL S.A.C."]:
+                    "CONECTA RETAIL", "INTEGRA RETAIL"]:
                     return "RETAIL"
 
                 # Materiales y acabados (excepto responsables excluidos)
@@ -222,7 +223,7 @@ class SistemaReportesPorCanal:
 
                 # Motos, excepto responsables retail
                 if row['CATEGORIA'] in ["MOTOS", "MOTOS ELECTRICAS", "ACCESORIOS MOTOS"] and row['RESPONSABLE DE VENTA'] not in [
-                    "CONECTA RETAIL S.A.", "INTEGRA RETAIL S.A.C."]:
+                    "CONECTA RETAIL", "INTEGRA RETAIL"]:
                     return "MOTOS"
 
                 # En cualquier otro caso, se respeta el canal del reporte
@@ -231,11 +232,13 @@ class SistemaReportesPorCanal:
             base['Canal de Venta'] = base.apply(derivar_canal, axis=1)
             base['Canal de Venta'] = base['Canal de Venta'].replace('CHATBOT', 'DIGITAL')
 
+            # Tipo de producto
             base['TipoProducto'] = base['PRODUCTO'].str.contains("PUNTO|DUCTE|ADICIONAL", case=False, na=False)
-            base['TipoProducto'] = np.where(base['TipoProducto'], "CON CONSTRUCCIÓN", "PRODUCTO SOLO")
-            base['Tipo Producto'] = np.where(
-                (base['ALIADO COMERCIAL'] == "GASODOMESTICOS") & (base['TipoProducto'] == "CON CONSTRUCCIÓN"),
-                "CON CONSTRUCCIÓN", "PRODUCTO SOLO")
+            base['TipoProducto'] = np.where(
+                base['TipoProducto'] & ~base['PRODUCTO'].str.contains("MULTIPUNTO", case=False, na=False),
+                "CON CONSTRUCCIÓN", 
+                "PRODUCTO SOLO"
+            )
 
             base['Tiempo'] = base['FECHA VENTA'].apply(lambda x: self.calcular_dias_habiles(x, feriados) + 1)
 
@@ -246,9 +249,9 @@ class SistemaReportesPorCanal:
                     return "FUERA DE PLAZO" if row['Tiempo'] > 30 else "DENTRO DE PLAZO"
                 elif row['CATEGORIA'] == 'MUEBLES':
                     return "FUERA DE PLAZO" if row['Tiempo'] > 15 else "DENTRO DE PLAZO"
-                elif row['Tipo Producto'] == 'CON CONSTRUCCIÓN':
+                elif row['TipoProducto'] == 'CON CONSTRUCCIÓN':
                     return "FUERA DE PLAZO" if row['Tiempo'] > 15 else "DENTRO DE PLAZO"
-                elif row['Tipo Producto'] == 'PRODUCTO SOLO':
+                elif row['TipoProducto'] == 'PRODUCTO SOLO':
                     return "FUERA DE PLAZO" if row['Tiempo'] > 4 else "DENTRO DE PLAZO"
                 else:
                     return ""

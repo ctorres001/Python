@@ -12,11 +12,11 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning, message='.*dayfirst.*')
 
 # ======================
-# CONFIGURACIÓN GLOBAL - SCORING RIESGOS
+# CONFIGURACIÓN GLOBAL - SEGMENTACIÓN
 # ======================
 
-# Archivo por defecto para SCORING RIESGOS
-ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\26. Scoring Riesgos\JV_SCORING_RIESGOS_HISTORICO_01112025.txt"
+# Archivo por defecto para SEGMENTACIÓN
+ARCHIVO_TXT_DEFAULT = r"D:\FNB\Reportes\25. Segmentación\SEGMENTACION_FNB_ACUMULADA_01122025.txt"
 
 # Conexión SQL Server
 SQL_CONFIG = {
@@ -26,24 +26,20 @@ SQL_CONFIG = {
     "password": "ibr2025"
 }
 
-# Mapeo de tipos de datos SQL Server - SCORING RIESGOS
+# Mapeo de tipos de datos SQL Server - SEGMENTACIÓN
 COLUMN_TYPES_SQL = {
-    "PERIODO": "DATETIME",
-    "CTA_CONTR": "BIGINT",
-    "DNI": "VARCHAR(20)",
-    "SEGMENTO_RIESGO": "VARCHAR(500)",
     "INTERLOCUTOR": "BIGINT",
-    "FLAG_SEGMENTO_CORREGIDO": "VARCHAR(500)"
+    "FLAG_SEGMENTACION": "VARCHAR(500)",
+    "FECHA_CORTE": "DATETIME",
+    "CTA_CONTR": "BIGINT"
 }
 
-# Mapeo de nombres originales a nombres SQL-compatibles - SCORING RIESGOS
+# Mapeo de nombres originales a nombres SQL-compatibles - SEGMENTACIÓN
 MAPEO_NOMBRES_COLUMNAS = {
-    "PERIODO": "PERIODO",
-    "CTA_CONTR": "CTA_CONTR",
-    "DNI": "DNI",
-    "SEGMENTO_RIESGO": "SEGMENTO_RIESGO",
     "INTERLOCUTOR": "INTERLOCUTOR",
-    "FLAG_SEGMENTO_CORREGIDO": "FLAG_SEGMENTO_CORREGIDO"
+    "FLAG_SEGMENTACION": "FLAG_SEGMENTACION",
+    "FECHA_CORTE": "FECHA_CORTE",
+    "CTA_CONTR": "CTA_CONTR"
 }
 
 # ======================
@@ -69,38 +65,13 @@ def detectar_separador(linea_cabecera):
     """Detecta el separador utilizado en el archivo"""
     separadores = ['\t', ';', ',', '|']
     for sep in separadores:
-        if linea_cabecera.count(sep) > 3:  # Al menos 4 columnas
+        if linea_cabecera.count(sep) > 2:  # Al menos 3 columnas
             return sep
     return '\t'
 
-def convertir_periodo_a_fecha(periodo_str):
-    """
-    Convierte PERIODO en formato YYYYMM a fecha DATETIME
-    Ejemplo: '202510' -> datetime(2025, 10, 1)
-    """
-    try:
-        if pd.isna(periodo_str) or periodo_str == '' or str(periodo_str) == 'nan':
-            return None
-        
-        periodo_str = str(periodo_str).strip()
-        
-        # Si ya es fecha, retornar
-        if '-' in periodo_str or '/' in periodo_str:
-            return pd.to_datetime(periodo_str, errors='coerce')
-        
-        # Convertir YYYYMM a fecha (primer día del mes)
-        if len(periodo_str) == 6 and periodo_str.isdigit():
-            anio = int(periodo_str[:4])
-            mes = int(periodo_str[4:6])
-            return datetime(anio, mes, 1)
-        
-        return None
-    except:
-        return None
-
 def analizar_archivo_txt(archivo_entrada):
     """Analiza la estructura del archivo antes de la limpieza"""
-    print("=== ANÁLISIS DEL ARCHIVO TXT SCORING RIESGOS ===")
+    print("=== ANÁLISIS DEL ARCHIVO TXT SEGMENTACIÓN ===")
     
     codificacion = detectar_codificacion(archivo_entrada)
     
@@ -133,8 +104,8 @@ def analizar_archivo_txt(archivo_entrada):
     print("=" * 50)
 
 def limpiar_archivo_txt(archivo_entrada):
-    """Limpia un archivo TXT de SCORING RIESGOS y retorna DataFrame"""
-    print("=== INICIANDO LIMPIEZA DE ARCHIVO TXT SCORING RIESGOS ===")
+    """Limpia un archivo TXT de SEGMENTACIÓN y retorna DataFrame"""
+    print("=== INICIANDO LIMPIEZA DE ARCHIVO TXT SEGMENTACIÓN ===")
     
     codificacion = detectar_codificacion(archivo_entrada)
     
@@ -201,22 +172,6 @@ def limpiar_archivo_txt(archivo_entrada):
     df = df[columnas_existentes]
     print(f"✅ Columnas seleccionadas (mapeadas): {len(columnas_existentes)} columnas")
     
-    # CONVERSIÓN ESPECIAL DE PERIODO (YYYYMM -> DATETIME)
-    if 'PERIODO' in df.columns:
-        print("\n🔄 Convirtiendo columna PERIODO de YYYYMM a DATETIME...")
-        periodo_original = df['PERIODO'].head(3).tolist()
-        print(f"   Ejemplo antes: {periodo_original}")
-        
-        df['PERIODO'] = df['PERIODO'].apply(convertir_periodo_a_fecha)
-        
-        periodo_convertido = df['PERIODO'].head(3).tolist()
-        print(f"   Ejemplo después: {periodo_convertido}")
-        
-        # Contar conversiones exitosas
-        convertidos = df['PERIODO'].notna().sum()
-        total = len(df)
-        print(f"   ✅ Conversiones exitosas: {convertidos:,} de {total:,} ({convertidos/total*100:.1f}%)")
-    
     # Limpieza general
     df = aplicar_limpieza_general(df)
     
@@ -227,10 +182,6 @@ def limpiar_archivo_txt(archivo_entrada):
 def aplicar_limpieza_general(df):
     """Aplica limpieza general a los datos del DataFrame"""
     for col in df.columns:
-        # Saltar PERIODO ya que ya fue convertido
-        if col == 'PERIODO':
-            continue
-            
         if df[col].dtype == 'object':
             df[col] = df[col].astype(str).str.replace('\n', ' ', regex=False)
             df[col] = df[col].str.replace('\r', ' ', regex=False)
@@ -245,11 +196,16 @@ def aplicar_limpieza_general(df):
 def convertir_tipos_datos_basicos(df):
     """Convierte tipos de datos básicos"""
     for col in df.columns:
-        # Saltar PERIODO ya que ya fue convertido a datetime
-        if col == 'PERIODO':
-            continue
-            
         if df[col].dtype == 'object':
+            # Verificar si parece fecha
+            muestra = df[col].dropna().head(10)
+            if any(re.match(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', str(val)) for val in muestra):
+                try:
+                    df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+                    continue
+                except:
+                    pass
+            
             # Verificar si parece numérico
             try:
                 col_limpia = df[col].astype(str).str.replace(',', '').str.replace(' ', '')
@@ -267,7 +223,7 @@ def convertir_tipos_datos_basicos(df):
 # ======================
 
 def generar_nombre_tabla(archivo_path):
-    """Genera nombre de tabla basado en el archivo - SCORING RIESGOS"""
+    """Genera nombre de tabla basado en el archivo - SEGMENTACIÓN"""
     nombre_archivo = os.path.basename(archivo_path)
     
     # Buscar patrón de fecha en el nombre del archivo (DDMMYYYY)
@@ -279,11 +235,11 @@ def generar_nombre_tabla(archivo_path):
         mes = fecha[2:4]
         anio = fecha[4:8]
         fecha_sql = f"{anio}{mes}{dia}"
-        return f"BD_Scoring_Historico_{fecha_sql}"
+        return f"BD_Segmentacion_Historica_{fecha_sql}"
     
     # Fallback: usar fecha actual
     timestamp = datetime.now().strftime("%Y%m%d")
-    return f"BD_Scoring_Historico_{timestamp}"
+    return f"BD_Segmentacion_Historica_{timestamp}"
 
 def limpiar_nombres_columnas_sql(df):
     """Limpia nombres de columnas para SQL Server"""
@@ -322,7 +278,7 @@ def limpiar_nombres_columnas_sql(df):
     return df
 
 def convertir_tipos_datos_sql(df):
-    """Convierte tipos de datos según mapeo SQL - SCORING RIESGOS"""
+    """Convierte tipos de datos según mapeo SQL - SEGMENTACIÓN"""
     print("\n=== Conversión de tipos para SQL Server ===")
     
     for col in df.columns:
@@ -349,13 +305,7 @@ def convertir_tipos_datos_sql(df):
                 df[col] = df[col].round(2)
                 
             elif sql_type == "DATETIME":
-                # PERIODO ya fue convertido en limpiar_archivo_txt
-                if col == 'PERIODO':
-                    # Ya está como datetime, solo verificar
-                    if not pd.api.types.is_datetime64_any_dtype(df[col]):
-                        df[col] = pd.to_datetime(df[col], errors="coerce")
-                else:
-                    df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+                df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
             
             print(f"✓ {col}: {sql_type}")
             
@@ -546,7 +496,7 @@ def mostrar_resumen_proceso(df, archivo_original, csv_generado=None):
         return
     
     print("\n" + "=" * 60)
-    print("        RESUMEN DEL PROCESO - SCORING RIESGOS")
+    print("        RESUMEN DEL PROCESO - SEGMENTACIÓN")
     print("=" * 60)
     print(f"📁 Archivo original: {os.path.basename(archivo_original)}")
     if csv_generado:
@@ -554,13 +504,6 @@ def mostrar_resumen_proceso(df, archivo_original, csv_generado=None):
     print(f"📊 Registros procesados: {len(df):,}")
     print(f"📋 Columnas: {len(df.columns)}")
     print(f"   {', '.join(df.columns.tolist())}")
-    
-    # Mostrar rango de periodos si existe la columna
-    if 'PERIODO' in df.columns:
-        periodos_validos = df['PERIODO'].dropna()
-        if len(periodos_validos) > 0:
-            print(f"📅 Rango de periodos: {periodos_validos.min()} a {periodos_validos.max()}")
-    
     print("=" * 60)
 
 # ======================
@@ -569,7 +512,7 @@ def mostrar_resumen_proceso(df, archivo_original, csv_generado=None):
 
 def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, csv_path=None):
     """Proceso completo: TXT → Limpieza → CSV → SQL Server"""
-    print("🚀 INICIANDO PROCESO ETL - SCORING RIESGOS HISTÓRICO")
+    print("🚀 INICIANDO PROCESO ETL - SEGMENTACIÓN HISTÓRICA")
     print("=" * 60)
     print(f"📁 Archivo de entrada: {archivo_txt}")
     
@@ -627,7 +570,7 @@ def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, cs
         # 5. MOSTRAR RESUMEN
         mostrar_resumen_proceso(df_limpio, archivo_txt, csv_generado)
         
-        print(f"\n🎉 PROCESO ETL SCORING RIESGOS COMPLETADO!")
+        print(f"\n🎉 PROCESO ETL SEGMENTACIÓN COMPLETADO!")
         
         return df_limpio
         
@@ -638,9 +581,9 @@ def procesar_archivo_completo(archivo_txt, generar_csv=True, cargar_sql=True, cs
         return None
 
 def main():
-    """Función principal - Proceso automático SCORING RIESGOS"""
+    """Función principal - Proceso automático SEGMENTACIÓN"""
     print("=" * 80)
-    print("     SISTEMA ETL - SCORING RIESGOS HISTÓRICO - CALIDDA")
+    print("     SISTEMA ETL - SEGMENTACIÓN HISTÓRICA FNB - CALIDDA")
     print("=" * 80)
     
     # Usar directamente el archivo por defecto sin preguntar
@@ -654,7 +597,7 @@ def main():
     )
     
     if resultado is not None:
-        print("\n✅ Proceso SCORING RIESGOS finalizado exitosamente")
+        print("\n✅ Proceso SEGMENTACIÓN finalizado exitosamente")
     else:
         print("\n❌ El proceso falló")
 

@@ -457,16 +457,14 @@ class SalesDataProcessor:
             # === CÁLCULO DE TIEMPO Y RANGO DE ENTREGA ===
             feriados = self._cargar_feriados()
 
-            # Cálculo de TipoProducto
-            df_final['TipoProducto'] = df_final['PRODUCTO_1'].astype(str).str.upper().str.contains(
-                "PUNTO|DUCTE|ADICIONAL", na=False)
-            df_final['TipoProducto'] = np.where(df_final['TipoProducto'], "CON CONSTRUCCIÓN", "PRODUCTO SOLO")
-
-            # Cálculo de Tipo Producto
-            df_final['Tipo Producto'] = np.where(
-                (df_final['ALIADO COMERCIAL'].astype(str).str.upper() == "GASODOMESTICOS") &
-                (df_final['TipoProducto'] == "CON CONSTRUCCIÓN"),
-                "CON CONSTRUCCIÓN", "PRODUCTO SOLO"
+            # Cálculo de TipoProducto (excluye MULTIPUNTO)
+            producto_upper = df_final['PRODUCTO_1'].astype(str).str.upper()
+            tiene_construccion = producto_upper.str.contains("PUNTO|DUCTE|ADICIONAL", na=False)
+            tiene_multipunto = producto_upper.str.contains("MULTIPUNTO", na=False)
+            df_final['TipoProducto'] = np.where(
+                tiene_construccion & ~tiene_multipunto, 
+                "CON CONSTRUCCIÓN", 
+                "PRODUCTO SOLO"
             )
 
             # Cálculo de tiempo en días hábiles (de FECHA VENTA a FECHA ENTREGA o HOY)
@@ -488,7 +486,7 @@ class SalesDataProcessor:
                 aliado = str(row.get('ALIADO COMERCIAL', '')).upper()
                 canal = str(row.get('CANAL_VENTA', '')).upper()
                 categoria = str(row.get('CATEGORIA_1', '')).upper()
-                tipo_producto = row.get('Tipo Producto', '')
+                tipo_producto = row.get('TipoProducto', '')
                 tiempo = row.get('Tiempo', 0)
 
                 if pd.isna(tiempo):
@@ -508,7 +506,7 @@ class SalesDataProcessor:
                 return ""
 
             df_final['Rango'] = df_final.apply(evaluar_rango, axis=1)
-            logger.info("Columnas 'TipoProducto', 'Tipo Producto', 'Tiempo' y 'Rango' agregadas exitosamente")
+            logger.info("Columnas 'TipoProducto', 'Tiempo' y 'Rango' agregadas exitosamente")
 
             # CORRECCIÓN: Determinar canal de venta y validar completitud
             mapeo = self._cargar_mapeo_canales()

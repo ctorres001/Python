@@ -32,6 +32,7 @@ class ReporteFNB:
         self.df = None
         self.responsables = None
         self.proveedores = None
+        self.exonerados = []  # Lista de pedidos exonerados
         self.solo_canales_propios = False
 
         # NUEVOS PARÁMETROS
@@ -154,6 +155,29 @@ class ReporteFNB:
         except Exception as e:
             logger.error(f"Error cargando destinatarios: {e}")
             raise
+
+    def cargar_exonerados(self):
+        """Carga el archivo de transacciones exoneradas para SALESLAND"""
+        try:
+            ruta_exonerados = self.ruta_base / 'Exonerados' / 'Exonerados.xlsx'
+            
+            if not ruta_exonerados.exists():
+                logger.warning(f"Archivo de exonerados no encontrado: {ruta_exonerados}")
+                self.exonerados = []
+                return
+            
+            df_exonerados = pd.read_excel(ruta_exonerados)
+            # Tomar la columna A (primera columna) y convertir a lista
+            self.exonerados = df_exonerados.iloc[:, 0].astype(str).str.strip().tolist()
+            self.exonerados = [x for x in self.exonerados if x and x.lower() != 'nan']  # Limpiar vacíos
+            
+            logger.info(f"Exonerados cargados: {len(self.exonerados)} transacciones")
+            if self.exonerados:
+                logger.info(f"Primeros 5 exonerados: {self.exonerados[:5]}")
+        
+        except Exception as e:
+            logger.error(f"Error cargando exonerados: {e}")
+            self.exonerados = []
     def crear_tabla_dinamica(
             self,
             data: pd.DataFrame,
@@ -578,12 +602,20 @@ class ReporteFNB:
         for nombre in orden_prioridad:
             if nombre in self.responsables['Nombre Responsable de Venta'].values:
                 filtro = self.df[self.df['Nombre Responsable de Venta'] == nombre]
-                if not filtro.empty:
-                    filtros_aplicados.append((filtro, nombre))
             elif nombre in self.proveedores['Nombre de Proveedor'].values:
                 filtro = self.df[self.df['Nombre de Proveedor'] == nombre]
-                if not filtro.empty:
-                    filtros_aplicados.append((filtro, nombre))
+            else:
+                continue
+            
+            # Aplicar filtro de exonerados para SALESLAND
+            if nombre == 'SALESLAND' and self.exonerados:
+                registros_antes = len(filtro)
+                filtro = filtro[~filtro['Pedido Venta'].astype(str).str.strip().isin(self.exonerados)]
+                registros_despues = len(filtro)
+                logger.info(f"Exonerados aplicados a SALESLAND (canales propios): {registros_antes - registros_despues} registros eliminados")
+            
+            if not filtro.empty:
+                filtros_aplicados.append((filtro, nombre))
 
         # Agregar el resto solo si aplica
         if not self.solo_canales_propios:
@@ -598,6 +630,14 @@ class ReporteFNB:
                     ]
                 else:
                     filtro = self.df[self.df['Nombre de Proveedor'] == nombre]
+                
+                # Aplicar filtro de exonerados para SALESLAND
+                if nombre == 'SALESLAND' and self.exonerados:
+                    registros_antes = len(filtro)
+                    filtro = filtro[~filtro['Pedido Venta'].astype(str).str.strip().isin(self.exonerados)]
+                    registros_despues = len(filtro)
+                    logger.info(f"Exonerados aplicados a SALESLAND: {registros_antes - registros_despues} registros eliminados")
+                
                 if not filtro.empty:
                     filtros_aplicados.append((filtro, nombre))
 
@@ -622,6 +662,7 @@ class ReporteFNB:
             self.tipo_actividad = self.seleccionar_actividad()
             self.df = self.cargar_datos(archivo_origen)
             self.cargar_destinatarios()
+            self.cargar_exonerados()  # Cargar transacciones exoneradas
             filtros_aplicados = self.obtener_filtros_aplicados()
 
             inicio_total = time.time()

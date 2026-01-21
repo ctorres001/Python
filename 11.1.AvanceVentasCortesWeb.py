@@ -8,13 +8,16 @@ import warnings
 import webbrowser
 import base64
 from io import BytesIO
+import asyncio
+import zipfile
+from importlib.machinery import SourceFileLoader
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 
 class SalesTransformer:
     def __init__(self):
-        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\00. Estructura Reporte\Canal\Canal.xlsx"
+        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal\Canal.xlsx"
         self.columnas_producto = [
             "PRODUCTO", "SKU", "CANTIDAD", "PRECIO", "CATEGORIA", "MARCA", "SUBCANAL",
             "CATEGORIA REAL", "TIPO PRODUCTO", "MODELO PRODUCTO", "SKU2", "DESCRIPCION"
@@ -565,7 +568,7 @@ def generar_dashboard_html_detallado(df_comparativo, fecha_anterior, fecha_nueva
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard de Ventas Detallado - {fecha_anterior} vs {fecha_nueva}</title>
+    <title>Avance de Ventas FNB - {fecha_anterior} vs {fecha_nueva}</title>
     <style>
         * {{
             margin: 0;
@@ -1150,6 +1153,322 @@ def generar_dashboard_html_detallado(df_comparativo, fecha_anterior, fecha_nueva
     return html_template
 
 
+def duplicar_html_como_txt(ruta_html: str) -> str | None:
+    """Crea una copia .txt del HTML para evitar bloqueo de extensión en WhatsApp."""
+    if not os.path.exists(ruta_html):
+        print(f"   ❌ No existe el HTML para copiar: {ruta_html}")
+        return None
+    ruta_txt = os.path.splitext(ruta_html)[0] + ".txt"
+    try:
+        with open(ruta_html, 'r', encoding='utf-8') as src, open(ruta_txt, 'w', encoding='utf-8') as dst:
+            dst.write(src.read())
+        print(f"   ✅ Copia TXT generada: {ruta_txt}")
+        return ruta_txt
+    except Exception as e:
+        print(f"   ❌ No se pudo crear la copia TXT: {e}")
+        return None
+
+
+def comprimir_html_en_zip(ruta_html: str) -> str | None:
+    """Comprime el HTML en un ZIP para enviar por WhatsApp."""
+    if not os.path.exists(ruta_html):
+        print(f"   ❌ No existe el HTML para comprimir: {ruta_html}")
+        return None
+    
+    base, _ = os.path.splitext(ruta_html)
+    ruta_zip = base + ".zip"
+    
+    try:
+        with zipfile.ZipFile(ruta_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.write(ruta_html, arcname=os.path.basename(ruta_html))
+        print(f"   ✅ HTML comprimido en ZIP: {os.path.basename(ruta_zip)}")
+        return ruta_zip
+    except Exception as e:
+        print(f"   ❌ No se pudo crear el ZIP: {e}")
+        return None
+
+
+async def enviar_documento_whatsapp(whatsapp, ruta_archivo):
+    """Adjunta un archivo (HTML) en el chat abierto."""
+    if not os.path.exists(ruta_archivo):
+        print(f"   ❌ Archivo no encontrado para enviar: {ruta_archivo}")
+        return False
+
+    try:
+        # Paso 1: Click en botón de adjuntar (clip)
+        print("   🔍 Buscando botón adjuntar...")
+        clip_selectors = [
+            "[data-testid='clip']",
+            "span[data-icon='clip']",
+            "[data-icon='clip']",
+            "button[aria-label='Adjuntar']",
+            "button[aria-label='Attach']",
+            "[title='Adjuntar']",
+            "[title='Attach']",
+        ]
+        boton_clip = None
+        for sel in clip_selectors:
+            try:
+                boton_clip = await whatsapp.page.wait_for_selector(sel, timeout=3000, state='visible')
+                if boton_clip:
+                    print(f"   ✅ Botón adjuntar encontrado: {sel}")
+                    break
+            except Exception:
+                continue
+
+        if not boton_clip:
+            print("   ⚠️ No se encontró con selectores específicos, buscando todos los botones...")
+            try:
+                # Buscar cualquier botón que contenga un icono de clip
+                all_buttons = await whatsapp.page.query_selector_all("button, span[role='button']")
+                for btn in all_buttons:
+                    try:
+                        # Verificar si tiene data-icon o aria-label relacionado con adjuntar
+                        data_icon = await btn.get_attribute("data-icon")
+                        aria_label = await btn.get_attribute("aria-label")
+                        title = await btn.get_attribute("title")
+                        
+                        if (data_icon and 'clip' in data_icon.lower()) or \
+                           (aria_label and ('adjuntar' in aria_label.lower() or 'attach' in aria_label.lower())) or \
+                           (title and ('adjuntar' in title.lower() or 'attach' in title.lower())):
+                            boton_clip = btn
+                            print(f"   ✅ Botón adjuntar encontrado por búsqueda amplia")
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                print(f"   ⚠️ Error en búsqueda amplia: {e}")
+
+        if not boton_clip:
+            print("   ❌ No se encontró el botón de adjuntar en WhatsApp Web")
+            return False
+
+        await boton_clip.click()
+        print("   ✅ Click en botón adjuntar, esperando menú...")
+        await asyncio.sleep(2)  # Esperar a que aparezca el menú completo
+
+        # Paso 2: Click en opción "Documento" del menú (botón visible, NO el input)
+        print("   🔍 Buscando botón Documento en el menú...")
+        btn_doc_selectors = [
+            "li[data-testid='mi-attach-document']",
+            "button[aria-label*='ocumento']",
+            "span[data-icon='document']",
+            "[title*='ocumento']",
+            "input[accept*='*'][type='file']",  # Input que acepta cualquier archivo
+        ]
+        
+        btn_documento = None
+        for sel in btn_doc_selectors:
+            try:
+                btn_documento = await whatsapp.page.wait_for_selector(sel, timeout=2000, state='attached')
+                if btn_documento:
+                    print(f"   ✅ Botón/Input Documento encontrado: {sel}")
+                    break
+            except Exception:
+                continue
+
+        # Si no lo encontramos, buscar entre todos los elementos visibles
+        if not btn_documento:
+            print("   🔍 Búsqueda amplia de opción Documento...")
+            try:
+                all_items = await whatsapp.page.query_selector_all("li, button, span, input[type='file']")
+                for item in all_items:
+                    try:
+                        data_testid = await item.get_attribute("data-testid")
+                        aria_label = await item.get_attribute("aria-label")
+                        title = await item.get_attribute("title")
+                        data_icon = await item.get_attribute("data-icon")
+                        
+                        if (data_testid and 'document' in data_testid.lower()) or \
+                           (aria_label and 'document' in aria_label.lower()) or \
+                           (title and 'document' in title.lower()) or \
+                           (data_icon and 'document' in data_icon.lower()):
+                            btn_documento = item
+                            print(f"   ✅ Elemento Documento encontrado por búsqueda amplia")
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                print(f"   ⚠️ Error en búsqueda amplia: {e}")
+
+        if not btn_documento:
+            print("   ❌ No se encontró el botón Documento en el menú")
+            print("   💡 Intenta ejecutar manualmente para verificar la estructura del menú")
+            return False
+
+        # Paso 3: Adjuntar archivo directamente al input (sin click, bypass del menú visual)
+        print("   📎 Buscando input file para adjuntar...")
+        
+        try:
+            # Buscar inputs file en orden de preferencia (menos restrictivos primero)
+            input_file = None
+            selectors_input = [
+                "input[type='file']",  # Cualquier input sin restricciones
+                "input[type='file'][accept*='*']",  # Que acepte cualquier tipo
+                "input[type='file']:not([accept])",  # Sin atributo accept
+            ]
+            
+            for sel in selectors_input:
+                try:
+                    input_file = await whatsapp.page.query_selector(sel)
+                    if input_file:
+                        accept = await input_file.get_attribute("accept")
+                        print(f"   ✅ Input file encontrado - accept: {accept if accept else 'sin restricción'}")
+                        break
+                except Exception:
+                    continue
+            
+            if not input_file:
+                # Fallback: obtener todos los inputs y usar el que tenga menos restricciones
+                print("   🔍 Búsqueda amplia de inputs file...")
+                inputs = await whatsapp.page.query_selector_all("input[type='file']")
+                if inputs:
+                    input_file = inputs[0]  # Usar el primero encontrado
+                    accept = await input_file.get_attribute("accept")
+                    print(f"   ✅ Input file seleccionado - accept: {accept if accept else 'sin restricción'}")
+            
+            if not input_file:
+                print("   ❌ No se encontró ningún input[type='file']")
+                return False
+            
+            # Mostrar info del archivo a adjuntar
+            print(f"   📂 Adjuntando: {os.path.basename(ruta_archivo)}")
+            print(f"   📊 Tamaño: {os.path.getsize(ruta_archivo) / 1024:.1f} KB")
+            
+            # Adjuntar directamente
+            await input_file.set_input_files(ruta_archivo)
+            print("   ✅ Archivo adjuntado al input")
+            
+        except Exception as e:
+            print(f"   ❌ Error al adjuntar archivo: {e}")
+            return False
+
+        # Paso 4: Esperar preview y buscar botón de enviar
+        print("   ⏳ Esperando preview del documento...")
+        await asyncio.sleep(2)  # esperar a que aparezca el preview y botones
+
+        print("   🔍 Buscando botón enviar...")
+        selectors_enviar = [
+            "span[data-icon='send']",
+            "span[data-testid='send']",
+            "[data-testid='compose-btn-send']",
+            "button[aria-label*='Enviar']",
+            "button[aria-label*='Send']",
+        ]
+
+        enviado = False
+        for sel in selectors_enviar:
+            try:
+                btn_send = await whatsapp.page.wait_for_selector(sel, timeout=5000, state='visible')
+                if btn_send:
+                    print(f"   ✅ Botón enviar encontrado: {sel}")
+                    await btn_send.click()
+                    enviado = True
+                    break
+            except Exception as e:
+                continue
+
+        if not enviado:
+            print("   ⚠️ No se encontró el botón de enviar, intentando Enter...")
+            try:
+                await whatsapp.page.keyboard.press("Enter")
+                enviado = True
+                print("   ✅ Enter presionado")
+            except Exception:
+                pass
+
+        if not enviado:
+            print("   ❌ No se pudo enviar el archivo adjunto")
+            return False
+
+        await asyncio.sleep(2)
+        print(f"   ✅ Archivo enviado exitosamente: {os.path.basename(ruta_archivo)}")
+        return True
+    except Exception as e:
+        print(f"   ❌ Error enviando archivo: {e}")
+        return False
+
+
+async def enviar_reporte_whatsapp(ruta_dashboard, fecha_anterior, fecha_nueva, hora_corte):
+    """Envía saludo y adjunto HTML vía WhatsApp usando WhatsAppSender de 02.8."""
+    print("\n=== ENVIANDO REPORTE POR WHATSAPP ===")
+
+    try:
+        modulo_whatsapp = SourceFileLoader(
+            "avance_whatsapp", r"D:\FNB\Proyectos\Python\02.8.AvanceVentasCortesImagen.py"
+        ).load_module()
+        WhatsAppSender = getattr(modulo_whatsapp, "WhatsAppSender")
+    except Exception as e:
+        print(f"❌ No se pudo cargar WhatsAppSender desde 02.8: {e}")
+        return False
+
+    numeros_destino = [
+        #"51976650091",  # Stefany
+        #"51940193512",  # Chema
+        "51941377441",  # Carlos
+    ]
+
+    # Preparar ZIP del HTML (WhatsApp bloquea .html por seguridad)
+    print("\n📦 Comprimiendo HTML en ZIP para envío...")
+    ruta_zip = comprimir_html_en_zip(ruta_dashboard)
+    if not ruta_zip:
+        print("❌ No se pudo comprimir el HTML")
+        return False
+
+    whatsapp = WhatsAppSender()
+
+    print("\n🔄 Inicializando WhatsApp Web...")
+    inicializado = await whatsapp.inicializar_driver()
+    if not inicializado:
+        print("\n❌ No se pudo inicializar WhatsApp Web")
+        return False
+
+    print("✅ WhatsApp Web inicializado correctamente\n")
+    print("🔍 Verificando que WhatsApp Web esté listo...")
+    await asyncio.sleep(3)
+    try:
+        await whatsapp.page.wait_for_selector("[data-testid='chat-list'], canvas", timeout=5000)
+        print("✅ WhatsApp Web listo para enviar mensajes\n")
+    except Exception:
+        print("⚠️ No se pudo verificar el estado de WhatsApp Web, continuando...\n")
+
+    hora_actual = datetime.now().time()
+    saludo_base = f"se brinda el avance comparativo de ventas. Periodo {fecha_anterior} vs {fecha_nueva} - Corte {hora_corte}"
+    if hora_actual < dt_time(12, 0):
+        saludo = f"Buenos días, {saludo_base}"
+    else:
+        saludo = f"Buenas tardes, {saludo_base}"
+
+    try:
+        for idx, numero in enumerate(numeros_destino, 1):
+            print(f"📱 [{idx}/{len(numeros_destino)}] Enviando a {numero}")
+
+            if not await whatsapp.buscar_contacto(numero):
+                print(f"   ❌ No se pudo abrir chat con {numero}, se omite")
+                continue
+
+            exito_saludo = await whatsapp.enviar_mensaje(saludo)
+            if not exito_saludo:
+                print("   ⚠️ No se pudo enviar el saludo")
+
+            exito_archivo = await enviar_documento_whatsapp(whatsapp, ruta_zip)
+            if not exito_archivo:
+                print("   ❌ No se pudo enviar el archivo ZIP adjunto")
+
+            await asyncio.sleep(2)
+
+        return True
+    except Exception as e:
+        print(f"❌ Error durante el envío por WhatsApp: {e}")
+        return False
+    finally:
+        print("\n🔒 Cerrando WhatsApp Web...")
+        try:
+            await whatsapp.cerrar()
+        except Exception as cierre_err:
+            print(f"⚠️ Error al cerrar WhatsApp Web: {cierre_err}")
+
+
 def generar_reporte_dashboard():
     """Función principal modificada para generar dashboard HTML detallado sin gráfico"""
     # CONFIGURACIÓN
@@ -1268,7 +1587,9 @@ def generar_reporte_dashboard():
     # Crear directorio si no existe
     os.makedirs(ruta_dashboards, exist_ok=True)
     
-    nombre_archivo = f"dashboard_detallado_{fecha_anterior.replace('/', '-')}_vs_{fecha_nueva.replace('/', '-')}.html"
+    # Formato de hora para el nombre (convertir de time a string formateado)
+    hora_corte_str = str(hora_corte)
+    nombre_archivo = f"Avance de Ventas FNB - Periodo {fecha_anterior.replace('/', '-')} vs {fecha_nueva.replace('/', '-')} - Corte {hora_corte_str.replace(':', '-')}.html"
     ruta_dashboard = os.path.join(ruta_dashboards, nombre_archivo)
     
     with open(ruta_dashboard, 'w', encoding='utf-8') as file:
@@ -1293,6 +1614,12 @@ def generar_reporte_dashboard():
         print(f"⚠️ No se pudo abrir automáticamente: {e}")
         print("🔗 Abra manualmente el archivo HTML en su navegador")
     
+    # ENVIAR POR WHATSAPP: saludo + archivo HTML
+    try:
+        asyncio.run(enviar_reporte_whatsapp(ruta_dashboard, fecha_anterior, fecha_nueva, str(hora_corte)))
+    except Exception as e:
+        print(f"⚠️ No se pudo completar el envío por WhatsApp: {e}")
+
     # MOSTRAR INFORMACIÓN PARA COMPARTIR
     print(f"\n📤 INSTRUCCIONES PARA COMPARTIR:")
     print(f"1. El archivo '{nombre_archivo}' incluye análisis detallado por canal")
