@@ -89,7 +89,8 @@ class SalesDataRestructurer:
             "Columna libre 21",
             "Tipo Producto",
             "TIPO DE VALIDACION RENIEC",
-            "CATEG FINAL"
+            "CATEG FINAL",
+            "ProductoSeguro"
         ]
         
         self.columnas_grupo1 = []
@@ -441,6 +442,13 @@ class SalesDataRestructurer:
                 # Si solo existe CATEGORIA
                 mapeo_cat = df.drop_duplicates('codigo_unico')[['codigo_numerado', 'CATEGORIA']].set_index('codigo_numerado')['CATEGORIA'].to_dict()
                 df_final['CATEG FINAL'] = df_final['codigo_numerado'].map(mapeo_cat)
+
+            # Agregar columna ProductoSeguro
+            if 'ALIADO COMERCIAL' in df_final.columns:
+                aliado_upper = df_final['ALIADO COMERCIAL'].astype(str).str.strip().str.upper()
+                df_final['ProductoSeguro'] = np.where(aliado_upper == 'CARDIF', 'SEGURO', 'PRODUCTO')
+            else:
+                df_final['ProductoSeguro'] = ''
 
             # Crear columnas vacías (blancas)
             for col_libre in self.columnas_finales_orden:

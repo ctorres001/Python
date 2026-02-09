@@ -63,6 +63,7 @@ def crear_tabla_bd_colocaciones(cursor):
         tipo_instalacion VARCHAR(100),
         tipo_validacion_identidad VARCHAR(100),
         categoria_principal VARCHAR(255),
+        producto_seguro VARCHAR(50),
         nro_transacciones INT,
         fee_porcentaje NUMERIC(10, 4),
         fee_sol NUMERIC(18, 2),
@@ -108,7 +109,7 @@ def cargar_excel_a_postgresql():
             'producto_4', 'sku_4', 'concatenar', 'asesor', 'adicional', 'b_enero',
             'tiempo_de_entrega', 'rangos', 'zona_de_venta', 'marca', 'modelo',
             'canal', 'tipo_de_producto', 'tipo_instalacion', 'tipo_validacion_identidad',
-            'categoria_principal', 'nro_transacciones', 'fee_porcentaje', 'fee_sol',
+            'categoria_principal', 'producto_seguro', 'nro_transacciones', 'fee_porcentaje', 'fee_sol',
             'tea', 'tem', 'tc', 'valor_cuota_mes_usd', 'valor_cuota_mes_sol',
             'colocacion_usd', 'financiamiento_usd', 'fee_usd', 'fee_sin_igv_usd'
         ]
@@ -135,6 +136,7 @@ def cargar_excel_a_postgresql():
             'TIPO_INSTALACION': 'tipo_instalacion', 
             'TIPO_VALIDACION_IDENTIDAD': 'tipo_validacion_identidad',
             'CATEGORIA_PRINCIPAL': 'categoria_principal', 
+            'PRODUCTOSEGURO': 'producto_seguro',
             'NRO_TRANSACCIONES': 'nro_transacciones',
             'FEE_PORCENTAJE': 'fee_porcentaje', 'FEE_SOL': 'fee_sol',
             'TEA': 'tea', 'TEM': 'tem', 'TC': 'tc',
@@ -151,11 +153,23 @@ def cargar_excel_a_postgresql():
         # Renombrar columnas específicas
         df.rename(columns={'AÑO FE': 'AÑO_FE', 'B.ENERO': 'B_ENERO'}, inplace=True)
 
-        # Verificar columnas necesarias
+        # Verificar columnas necesarias (ProductoSeguro puede calcularse)
         excel_columns = [k for k in column_mapping.keys()]
-        missing = [c for c in excel_columns if c not in df.columns]
+        optional_columns = ['PRODUCTOSEGURO']
+        missing = [c for c in excel_columns if c not in df.columns and c not in optional_columns]
         if missing:
             raise ValueError(f"Faltan columnas en Excel: {missing}")
+
+        # Completar ProductoSeguro si no viene en el Excel
+        if 'PRODUCTOSEGURO' not in df.columns:
+            if 'ALIADO COMERCIAL' in df.columns:
+                aliado_upper = df['ALIADO COMERCIAL'].astype(str).str.strip().str.upper()
+                df['PRODUCTOSEGURO'] = np.where(aliado_upper == 'CARDIF', 'SEGURO', 'PRODUCTO')
+            elif 'PROVEEDOR' in df.columns:
+                proveedor_upper = df['PROVEEDOR'].astype(str).str.strip().str.upper()
+                df['PRODUCTOSEGURO'] = np.where(proveedor_upper == 'CARDIF', 'SEGURO', 'PRODUCTO')
+            else:
+                df['PRODUCTOSEGURO'] = 'PRODUCTO'
 
         # Renombrar columnas a formato PostgreSQL
         df = df[excel_columns].rename(columns=column_mapping)
@@ -248,11 +262,7 @@ def cargar_excel_a_postgresql():
 if __name__ == "__main__":
     print("Script de carga de datos de Excel a PostgreSQL")
     print("=" * 50)
-    confirm = input("¿Desea proceder con la carga de datos? (s/n): ").lower()
-    if confirm == "s":
-        start = datetime.now()
-        cargar_excel_a_postgresql()
-        end = datetime.now()
-        print(f"\nProceso completado en: {end - start}")
-    else:
-        print("Proceso cancelado")
+    start = datetime.now()
+    cargar_excel_a_postgresql()
+    end = datetime.now()
+    print(f"\nProceso completado en: {end - start}")
