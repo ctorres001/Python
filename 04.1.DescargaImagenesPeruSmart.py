@@ -38,6 +38,9 @@ def extraer_primer_url(texto):
     urls_con_parametros = re.findall(r'https?://[^\s]+?[?&](?:width|height|w|h|size)=[^\s]*', texto,
                                      flags=re.IGNORECASE)
 
+    # Buscar enlaces cortos de ibb.co
+    urls_ibb = re.findall(r'https?://ibb\.co/[^\s]+', texto, flags=re.IGNORECASE)
+
     # Priorizar URLs estáticas, luego dinámicas
     if urls_estaticas:
         return urls_estaticas[0]
@@ -45,6 +48,8 @@ def extraer_primer_url(texto):
         return urls_dinamicas[0]
     elif urls_con_parametros:
         return urls_con_parametros[0]
+    elif urls_ibb:
+        return urls_ibb[0]
 
     return None
 
@@ -159,6 +164,36 @@ def descargar_con_fallback(url, headers, session, connect_timeout=8, read_timeou
         raise
 
 
+def resolver_url_imagen(url, headers, session, connect_timeout=8, read_timeout=20):
+    # Algunos dominios (p. ej., ibb.co) entregan una pagina HTML con la imagen real.
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        if host.endswith('ibb.co'):
+            resp = descargar_con_fallback(url, headers, session, connect_timeout, read_timeout)
+            if resp.status_code != 200:
+                return url
+            html = resp.text
+            # Buscar meta og:image (sin asumir orden de atributos)
+            meta_tags = re.findall(r'<meta\s+[^>]*?>', html, flags=re.IGNORECASE)
+            for tag in meta_tags:
+                if re.search(r'(?:property|name)=["\"]og:image["\"]', tag, flags=re.IGNORECASE):
+                    content = re.search(r'content=["\"]([^"\"]+)["\"]', tag, flags=re.IGNORECASE)
+                    if content:
+                        return content.group(1)
+            # Fallback a data-image
+            match = re.search(r'data-image=["\"]([^"\"]+)["\"]', html, flags=re.IGNORECASE)
+            if match:
+                return match.group(1)
+            # Fallback directo a i.ibb.co
+            match = re.search(r'https?://i\.ibb\.co/[^\s"\']+', html, flags=re.IGNORECASE)
+            if match:
+                return match.group(0)
+    except Exception as e:
+        print(f"⚠️ No se pudo resolver URL de imagen: {e}")
+    return url
+
+
 # Procesar cada fila
 errores_404 = []
 exitosos = 0
@@ -184,7 +219,8 @@ for index, row in df.iterrows():
         print(f"🔍 Procesando SKU: {codigo_sku}")
         print(f"📍 URL: {url}")
 
-        response = descargar_con_fallback(url, headers, sesion, connect_timeout=8, read_timeout=20)
+        url_resuelta = resolver_url_imagen(url, headers, sesion, connect_timeout=8, read_timeout=20)
+        response = descargar_con_fallback(url_resuelta, headers, sesion, connect_timeout=8, read_timeout=20)
         if response.status_code == 200:
             # Obtener Content-Type del header
             content_type = response.headers.get('Content-Type', '')
