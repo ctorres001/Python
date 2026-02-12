@@ -483,6 +483,12 @@ class SalesDataRestructurer:
                 df_final['ESTADO'] = df_final['ESTADO'].replace('PENDIENTE DE APROBACIÓN', 'PENDIENTE DE ENTREGA')
                 logger.info("Valores 'PENDIENTE DE APROBACIÓN' reemplazados por 'PENDIENTE DE ENTREGA'")
 
+                # Limpiar FECHA ENTREGA para estados no entregados
+                if 'FECHA ENTREGA' in df_final.columns:
+                    no_entregado = df_final['ESTADO'] != 'ENTREGADO'
+                    df_final.loc[no_entregado, 'FECHA ENTREGA'] = pd.NaT
+                    logger.info("FECHA ENTREGA en blanco para estados no entregados")
+
             # Ordenar por FECHA VENTA y HORA VENTA
             columnas_ordenamiento = []
             if 'FECHA VENTA' in df_final.columns:
