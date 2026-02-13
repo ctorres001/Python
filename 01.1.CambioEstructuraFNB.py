@@ -40,20 +40,71 @@ class SalesDataProcessor:
         self.max_productos = 4
         self.ruta_feriados = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Feriados"
 
-    def _seleccionar_archivo(self, titulo: str) -> str:
-        # Verificar si existe el archivo en la ruta predeterminada
-        if os.path.exists(self.ruta_base):
-            logger.info(f"Usando archivo predeterminado: {self.ruta_base}")
-            return self.ruta_base
-        else:
-            logger.warning(f"Archivo predeterminado no encontrado: {self.ruta_base}")
+    def _buscar_archivos_origen(self) -> List[str]:
+        """Busca todos los archivos Excel en la carpeta de origen"""
+        carpeta_origen = os.path.dirname(self.ruta_base)
+        
+        if not os.path.exists(carpeta_origen):
+            logger.error(f"Carpeta de origen no encontrada: {carpeta_origen}")
+            # Si no existe la carpeta, abrir diálogo para seleccionar carpeta
             root = tk.Tk()
             root.withdraw()
-            return filedialog.askopenfilename(
-                title=titulo,
-                filetypes=[("Archivos Excel", "*.xlsx")],
-                initialdir=os.path.dirname(self.ruta_base)
+            carpeta_seleccionada = filedialog.askdirectory(
+                title="Seleccione la carpeta con los archivos de origen",
+                initialdir=os.path.dirname(carpeta_origen)
             )
+            if not carpeta_seleccionada:
+                return []
+            carpeta_origen = carpeta_seleccionada
+        
+        # Buscar todos los archivos Excel en la carpeta
+        archivos_excel = []
+        for archivo in os.listdir(carpeta_origen):
+            if archivo.endswith(('.xlsx', '.xls')) and not archivo.startswith('~$'):
+                ruta_completa = os.path.join(carpeta_origen, archivo)
+                archivos_excel.append(ruta_completa)
+        
+        archivos_excel.sort()  # Ordenar alfabéticamente
+        logger.info(f"Archivos Excel encontrados: {len(archivos_excel)}")
+        for archivo in archivos_excel:
+            logger.info(f"  - {os.path.basename(archivo)}")
+        
+        return archivos_excel
+    
+    def _consolidar_archivos(self, archivos: List[str]) -> pd.DataFrame:
+        """Consolida múltiples archivos Excel en un solo DataFrame"""
+        if not archivos:
+            raise ValueError("No se encontraron archivos para consolidar")
+        
+        logger.info(f"Iniciando consolidación de {len(archivos)} archivo(s)...")
+        dataframes = []
+        
+        for idx, archivo in enumerate(archivos, 1):
+            try:
+                logger.info(f"Cargando archivo {idx}/{len(archivos)}: {os.path.basename(archivo)}")
+                df = pd.read_excel(archivo)
+                
+                if df.empty:
+                    logger.warning(f"Archivo vacío: {os.path.basename(archivo)}")
+                    continue
+                
+                # Agregar columna de origen para trazabilidad
+                df['ARCHIVO_ORIGEN'] = os.path.basename(archivo)
+                dataframes.append(df)
+                logger.info(f"  ✓ {len(df):,} registros cargados")
+                
+            except Exception as e:
+                logger.error(f"Error al cargar {os.path.basename(archivo)}: {e}")
+                continue
+        
+        if not dataframes:
+            raise ValueError("No se pudieron cargar datos de ningún archivo")
+        
+        # Consolidar todos los DataFrames
+        df_consolidado = pd.concat(dataframes, ignore_index=True)
+        logger.info(f"Consolidación completada: {len(df_consolidado):,} registros totales")
+        
+        return df_consolidado
 
     def _determinar_columnas_dinamicas(self, columnas_archivo: List[str]):
         self.columnas_grupo2 = [col for col in self.columnas_grupo2_fijas if col in columnas_archivo]
@@ -389,30 +440,32 @@ class SalesDataProcessor:
 
     def procesar(self):
         try:
-            archivo = self._seleccionar_archivo("Seleccione archivo de ventas")
-            if not archivo:
-                logger.error("No se seleccionó archivo")
+            # Buscar todos los archivos Excel en la carpeta de origen
+            archivos = self._buscar_archivos_origen()
+            if not archivos:
+                logger.error("No se encontraron archivos para procesar")
                 return
 
-            logger.info(f"Archivo seleccionado: {archivo}")
+            logger.info(f"Se procesarán {len(archivos)} archivo(s)")
             self._actualizar_archivo_canal()
 
-            columnas = pd.read_excel(archivo, nrows=0).columns.tolist()
+            # Consolidar todos los archivos
+            df = self._consolidar_archivos(archivos)
+            
+            if df.empty:
+                raise ValueError("No hay datos para procesar")
+
+            logger.info(f"Datos consolidados: {len(df):,} filas")
+            
+            # Determinar columnas dinámicas
+            columnas = df.columns.tolist()
             self._determinar_columnas_dinamicas(columnas)
 
             if not self.columnas_grupo2:
                 raise ValueError("No se encontraron columnas de productos")
 
-            dtypes = self._optimizar_tipos_datos(columnas)
             columnas_fecha = [col for col in columnas if 'FECHA' in col.upper()]
             columnas_hora = [col for col in columnas if 'HORA' in col.upper()]
-
-            # CORRECCIÓN: Cargar fechas como string para parsear manualmente
-            df = pd.read_excel(archivo, dtype=dtypes)
-            if df.empty:
-                raise ValueError("Archivo sin datos")
-
-            logger.info(f"Datos cargados: {len(df):,} filas")
 
             # CORRECCIÓN: Parsear fechas manualmente con formato dd/mm/yyyy
             for fecha_col in columnas_fecha:
@@ -578,6 +631,7 @@ class SalesDataProcessor:
             self._aplicar_formato_excel(salida)
 
             logger.info(f"Archivo generado: {salida}")
+            print(f"✅ Archivos procesados: {len(archivos)}")
             print(f"✅ Registros procesados: {len(df_final):,}")
             print(f"✅ Productos pivotados por registro: {self.max_productos}")
             print(f"✅ CHATBOT cambiado por DIGITAL en CANAL_VENTA")
