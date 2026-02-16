@@ -145,6 +145,10 @@ class SistemaReportesAutomaticos:
                     "CONECTA RETAIL", "INTEGRA RETAIL"]:
                     return "MOTOS"
 
+                # Grupo Merpes - Muebles
+                if row['ALIADO COMERCIAL'] == "GRUPO MERPES" and row['CATEGORIA'] == "MUEBLES":
+                    return "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
+
                 return row['Canal_Reporte']
 
             base['Canal de Venta'] = base.apply(derivar_canal, axis=1)

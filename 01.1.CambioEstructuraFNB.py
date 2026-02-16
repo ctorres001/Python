@@ -525,41 +525,14 @@ class SalesDataProcessor:
 
             if col_fecha_entrega:
                 df_final['Tiempo'] = df_final.apply(
-                    lambda row: self._calcular_tiempo_exacto(row['FECHA VENTA'], row[col_fecha_entrega], feriados),
+                    lambda row: self._calcular_tiempo_exacto(row['FECHA VENTA'], row[col_fecha_entrega], feriados) + 1,
                     axis=1
                 )
             else:
                 df_final['Tiempo'] = df_final.apply(
-                    lambda row: self._calcular_tiempo_exacto(row['FECHA VENTA'], pd.NaT, feriados),
+                    lambda row: self._calcular_tiempo_exacto(row['FECHA VENTA'], pd.NaT, feriados) + 1,
                     axis=1
                 )
-
-            # Evaluación de rango de entrega basado en 'Tiempo'
-            def evaluar_rango(row):
-                aliado = str(row.get('ALIADO COMERCIAL', '')).upper()
-                canal = str(row.get('CANAL_VENTA', '')).upper()
-                categoria = str(row.get('CATEGORIA_1', '')).upper()
-                tipo_producto = row.get('TipoProducto', '')
-                tiempo = row.get('Tiempo', 0)
-
-                if pd.isna(tiempo):
-                    return ""
-
-                if aliado == 'MALL HOGAR':
-                    return "FUERA DE PLAZO" if tiempo > 10 else "DENTRO DE PLAZO"
-                if canal == 'MOTOS':
-                    return "FUERA DE PLAZO" if tiempo > 30 else "DENTRO DE PLAZO"
-                if categoria == 'MUEBLES':
-                    return "FUERA DE PLAZO" if tiempo > 15 else "DENTRO DE PLAZO"
-                if tipo_producto == 'CON CONSTRUCCIÓN':
-                    return "FUERA DE PLAZO" if tiempo > 15 else "DENTRO DE PLAZO"
-                if tipo_producto == 'PRODUCTO SOLO':
-                    return "FUERA DE PLAZO" if tiempo > 4 else "DENTRO DE PLAZO"
-
-                return ""
-
-            df_final['Rango'] = df_final.apply(evaluar_rango, axis=1)
-            logger.info("Columnas 'TipoProducto', 'Tiempo' y 'Rango' agregadas exitosamente")
 
             # CORRECCIÓN: Determinar canal de venta y validar completitud
             mapeo = self._cargar_mapeo_canales()
@@ -602,6 +575,33 @@ class SalesDataProcessor:
             if 'CANAL_VENTA' in df_final.columns:
                 df_final['CANAL_VENTA'] = df_final['CANAL_VENTA'].replace('CHATBOT', 'DIGITAL')
                 logger.info("Valores 'CHATBOT' cambiados por 'DIGITAL' en CANAL_VENTA")
+
+            # Evaluación de rango de entrega basado en 'Tiempo'
+            def evaluar_rango(row):
+                aliado = str(row.get('ALIADO COMERCIAL', '')).upper()
+                canal = str(row.get('CANAL_VENTA', '')).upper()
+                categoria = str(row.get('CATEGORIA_1', '')).upper()
+                tipo_producto = row.get('TipoProducto', '')
+                tiempo = row.get('Tiempo', 0)
+
+                if pd.isna(tiempo):
+                    return ""
+
+                if aliado == 'MALL HOGAR':
+                    return "FUERA DE PLAZO" if tiempo > 10 else "DENTRO DE PLAZO"
+                if canal == 'MOTOS':
+                    return "FUERA DE PLAZO" if tiempo > 30 else "DENTRO DE PLAZO"
+                if categoria == 'MUEBLES':
+                    return "FUERA DE PLAZO" if tiempo > 15 else "DENTRO DE PLAZO"
+                if tipo_producto == 'CON CONSTRUCCIÓN':
+                    return "FUERA DE PLAZO" if tiempo > 15 else "DENTRO DE PLAZO"
+                if tipo_producto == 'PRODUCTO SOLO':
+                    return "FUERA DE PLAZO" if tiempo > 4 else "DENTRO DE PLAZO"
+
+                return ""
+
+            df_final['Rango'] = df_final.apply(evaluar_rango, axis=1)
+            logger.info("Columnas 'TipoProducto', 'Tiempo' y 'Rango' agregadas exitosamente")
 
             # AJUSTE 2: Formatear HORA VENTA correctamente para Excel (solo hora, sin fecha)
             if 'HORA VENTA' in df_final.columns:
