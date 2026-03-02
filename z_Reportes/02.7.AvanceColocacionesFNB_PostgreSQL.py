@@ -614,7 +614,7 @@ class ReporteFNBPostgreSQL:
             cuerpo = self.generar_cuerpo_correo(proveedor, imagenes)
             mail.HTMLBody = cuerpo + signature
 
-            mail.Display()
+            mail.Send()
             logger.info(f"Correo enviado a: {to} | CC: {cc}")
 
             self._limpiar_imagenes_temporales(imagenes)
