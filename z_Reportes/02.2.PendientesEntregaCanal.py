@@ -132,6 +132,76 @@ class SistemaReportesPorCanal:
         dias_habiles = [d for d in dias_totales if d.weekday() != 6 and d.date() not in feriados]
         return max(len(dias_habiles) - 1, 0)
 
+    def _cargar_mapeo_canales(self, ruta_archivo):
+        """
+        Carga el mapeo de SEDE → CANAL desde el archivo Excel.
+        Columna A: SEDE, Columna B: CANAL
+        Normaliza ambas columnas a mayúsculas para matching confiable.
+        """
+        try:
+            df_canal = pd.read_excel(ruta_archivo, sheet_name='Hoja1')
+            if len(df_canal.columns) >= 2:
+                # Normalizar SEDE (columna A) a mayúsculas
+                sedes_normalizadas = df_canal.iloc[:, 0].astype(str).str.strip().str.upper()
+                # Normalizar CANAL (columna B) a mayúsculas
+                canales_normalizados = df_canal.iloc[:, 1].astype(str).str.strip().str.upper()
+                # Crear el diccionario de mapeo
+                mapeo = dict(zip(sedes_normalizadas, canales_normalizados))
+                print(f"✅ Mapeo de canales cargado: {len(mapeo)} sedes registradas")
+                return mapeo
+        except Exception as e:
+            print(f"⚠️ Error leyendo archivo de canales: {e}")
+        return {}
+
+    def _determinar_canal_vectorizado(self, df, mapeo, ruta_archivo):
+        """
+        Determina el canal de venta basándose ÚNICAMENTE en la columna SEDE.
+        Normaliza la columna SEDE a mayúsculas para hacer matching con el mapeo.
+        Valida que todas las sedes tengan un canal asignado válido.
+        
+        Retorna: serie de canales
+        """
+        # Normalizar SEDE a mayúsculas para matching
+        sede = df['SEDE'].astype(str).str.strip().str.upper()
+        
+        # VALIDACIÓN 1: Verificar que todas las sedes estén en el mapeo
+        sedes_unicas = set(sede.unique())
+        sedes_no_encontradas = sedes_unicas - mapeo.keys()
+        # Limpiar valores inválidos de sedes_no_encontradas
+        sedes_no_encontradas = {s for s in sedes_no_encontradas 
+                                if s and str(s).strip() and str(s).upper() not in ['NAN', 'NONE', 'NULL', 'N/A', '']}
+        
+        if sedes_no_encontradas:
+            mensaje_error = (
+                f"ERROR: Se encontraron {len(sedes_no_encontradas)} sede(s) que NO están en el archivo de canales:\n"
+                f"{', '.join(sorted(sedes_no_encontradas))}\n\n"
+                f"Por favor, agregue estas sedes al archivo:\n{ruta_archivo}"
+            )
+            print(f"❌ {mensaje_error}")
+            raise ValueError(mensaje_error)
+        
+        # Asignar canal usando el mapeo de SEDE
+        canal = sede.map(mapeo)
+        
+        # VALIDACIÓN 2: Verificar que ningún canal esté vacío o sea un valor inválido
+        valores_invalidos = ['', 'NAN', 'NONE', 'NULL', 'N/A']
+        mask_canal_invalido = canal.isin(valores_invalidos) | canal.isna()
+        
+        if mask_canal_invalido.any():
+            sedes_con_canal_invalido = sede.loc[mask_canal_invalido].unique()
+            canales_invalidos = canal.loc[mask_canal_invalido].unique()
+            mensaje_error = (
+                f"ERROR: Se encontraron {len(sedes_con_canal_invalido)} sede(s) con canal vacío o inválido:\n"
+                f"Sedes sin canal válido: {', '.join(sorted(sedes_con_canal_invalido))}\n"
+                f"Canales encontrados: {', '.join([str(c) for c in canales_invalidos])}\n\n"
+                f"Por favor, verifique que todas las sedes tengan un canal asignado en:\n{ruta_archivo}"
+            )
+            print(f"❌ {mensaje_error}")
+            raise ValueError(mensaje_error)
+        
+        print(f"✅ Canales asignados correctamente para {len(sedes_unicas)} sede(s) única(s)")
+        return canal
+
     # --- Reemplazo global de etiquetas HTML por <br> y '-' para viñetas ---
     def simplificar_html_global(self, html):
         """
@@ -165,11 +235,14 @@ class SistemaReportesPorCanal:
         print("=== PASO 1: GENERANDO ARCHIVOS EXCEL POR CANAL ===")
         try:
             ruta_base = self.buscar_excel_en_carpeta(self.carpeta_base_datos)
-            ruta_canal = self.buscar_excel_en_carpeta(self.carpeta_canal)
+            # Usar archivo actualizado de canales
+            ruta_canal = os.path.join(self.carpeta_canal, "Canal_Actualizado_01032026.xlsx")
+            if not os.path.exists(ruta_canal):
+                print(f"⚠️ No se encontró {ruta_canal}, buscando alternativa...")
+                ruta_canal = self.buscar_excel_en_carpeta(self.carpeta_canal)
             ruta_feriados = self.buscar_excel_en_carpeta(self.carpeta_feriados)
 
             base = self.cargar_y_limpiar(ruta_base)
-            canal = self.cargar_y_limpiar(ruta_canal)
             feriados_df = pd.read_excel(ruta_feriados)
             feriados = set(pd.to_datetime(feriados_df.iloc[:, 0]).dt.date)
 
@@ -199,37 +272,10 @@ class SistemaReportesPorCanal:
             # Procesamiento de datos
             base['FECHA VENTA'] = pd.to_datetime(base['FECHA VENTA'], errors='coerce', dayfirst=True)
             base['SEDE'] = base['SEDE'].astype(str).str.strip().str.upper()
-            canal['Nombre Tienda de Venta'] = canal['Nombre Tienda de Venta'].astype(str).str.strip().str.upper()
 
-            base = base.merge(canal, how='left', left_on='SEDE', right_on='Nombre Tienda de Venta')
-
-            def derivar_canal(row):
-                if pd.isna(row['FECHA VENTA']):
-                    return row['Canal_Reporte']
-
-                # Retail especial para TOPITOP desde 01/08/2025
-                if row['FECHA VENTA'] >= pd.Timestamp(2025, 8, 1) and row['RESPONSABLE DE VENTA'] in ["TOPITOP"]:
-                    return "RETAIL"
-
-                # Retail general para Conecta e Integra desde 01/02/2024
-                if row['FECHA VENTA'] >= pd.Timestamp(2024, 2, 1) and row['RESPONSABLE DE VENTA'] in [
-                    "CONECTA RETAIL", "INTEGRA RETAIL"]:
-                    return "RETAIL"
-
-                # Materiales y acabados (excepto responsables excluidos)
-                if row['CATEGORIA'] == "MATERIALES Y ACABADOS DE CONSTRUCCIÓN" and row['RESPONSABLE DE VENTA'] not in [
-                    "A & G INGENIERIA", "INCOSER GAS PERU S.A.C.", "PROMART"]:
-                    return "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
-
-                # Motos, excepto responsables retail
-                if row['CATEGORIA'] in ["MOTOS", "MOTOS ELECTRICAS", "ACCESORIOS MOTOS"] and row['RESPONSABLE DE VENTA'] not in [
-                    "CONECTA RETAIL", "INTEGRA RETAIL"]:
-                    return "MOTOS"
-
-                # En cualquier otro caso, se respeta el canal del reporte
-                return row['Canal_Reporte']
-
-            base['Canal de Venta'] = base.apply(derivar_canal, axis=1)
+            # Cargar mapeo de canales y determinar canal (con validaciones integradas)
+            mapeo = self._cargar_mapeo_canales(ruta_canal)
+            base['Canal de Venta'] = self._determinar_canal_vectorizado(base, mapeo, ruta_canal)
             base['Canal de Venta'] = base['Canal de Venta'].replace('CHATBOT', 'DIGITAL')
 
             # Tipo de producto

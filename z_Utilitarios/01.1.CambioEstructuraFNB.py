@@ -29,7 +29,7 @@ class SalesDataProcessor:
             "CATEGORIA REAL", "TIPO PRODUCTO", "MODELO PRODUCTO", "SKU2", "DESCRIPCION"
         ]
         self.columnas_numericas = ["IMPORTE (S./)", "CRÉDITO UTILIZADO", "Nro. DE CUOTAS", "CANTIDAD", "PRECIO"]
-        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal\Canal.xlsx"
+        self.ruta_canal_fija = r"D:\FNB\Reportes\19. Reportes IBR\Archivos comunes\Canal\Canal_Actualizado_01032026.xlsx"
         self.ruta_base = r"D:\\FNB\\Reportes\\19. Reportes IBR\\00. Estructura Reporte\\Base\\Base_Origen.xlsx"
         self.ruta_salida = r"D:\\FNB\\Reportes\\19. Reportes IBR\\00. Estructura Reporte\\Procesado"
         self.rangos_hora = [f"{h:02d}:{m:02d} - {(h + (m + 30) // 60) % 24:02d}:{(m + 30) % 60:02d}"
@@ -195,19 +195,24 @@ class SalesDataProcessor:
         return series_hora.apply(get_rango_hora)
 
     def _cargar_mapeo_canales(self) -> Dict[str, str]:
+        """
+        Carga el mapeo de SEDE → CANAL desde el archivo Excel.
+        Columna A: SEDE, Columna B: CANAL
+        Normaliza ambas columnas a mayúsculas para matching confiable.
+        """
         try:
             df_canal = pd.read_excel(self.ruta_canal_fija, sheet_name='Hoja1')
-            if len(df_canal.columns) >= 3:
-                # Crear mapeo case-insensitive
-                mapeo = {}
-                for _, row in df_canal.iterrows():
-                    clave_original = str(row.iloc[0]).strip()
-                    clave_upper = clave_original.upper()
-                    valor = str(row.iloc[2]).strip()
-                    mapeo[clave_upper] = valor
+            if len(df_canal.columns) >= 2:
+                # Normalizar SEDE (columna A) a mayúsculas
+                sedes_normalizadas = df_canal.iloc[:, 0].astype(str).str.strip().str.upper()
+                # Normalizar CANAL (columna B) a mayúsculas
+                canales_normalizados = df_canal.iloc[:, 1].astype(str).str.strip().str.upper()
+                # Crear el diccionario de mapeo
+                mapeo = dict(zip(sedes_normalizadas, canales_normalizados))
+                logger.info(f"Mapeo de canales cargado: {len(mapeo)} sedes registradas")
                 return mapeo
         except Exception as e:
-            logger.warning(f"Error leyendo Canal.xlsx: {e}")
+            logger.warning(f"Error leyendo archivo de canales: {e}")
         return {}
 
     def _cargar_feriados(self) -> set:
@@ -264,50 +269,52 @@ class SalesDataProcessor:
 
     def _determinar_canal_venta_vectorizado(self, df: pd.DataFrame, mapeo: Dict[str, str]) -> tuple:
         """
-        Determina el canal de venta y retorna también las sedes sin canal asignado
+        Determina el canal de venta basándose ÚNICAMENTE en la columna SEDE.
+        Normaliza la columna SEDE a mayúsculas para hacer matching con el mapeo.
+        Valida que todas las sedes tengan un canal asignado válido.
+        
+        Retorna: (serie_canales, sedes_sin_canal)
         """
-        responsable = df['RESPONSABLE DE VENTA'].astype(str).str.strip().str.upper()
-        aliado = df['ALIADO COMERCIAL'].astype(str).str.strip().str.upper()
-        fecha_venta = pd.to_datetime(df['FECHA VENTA'], errors='coerce')
+        # Normalizar SEDE a mayúsculas para matching
         sede = df['SEDE'].astype(str).str.strip().str.upper()
-        categoria = df.get('CATEGORIA_1', pd.Series([''] * len(df))).astype(str).str.strip().str.upper()
-
-        canal = pd.Series([''] * len(df))
-        fecha_limite = pd.to_datetime('2024-02-01')
-        fecha_limite_1 = pd.to_datetime('2025-08-01')
-
-        # Condiciones específicas
-        cond_retail_1 = (fecha_venta >= fecha_limite_1) & (responsable.isin(["TOPITOP"]))
-        cond_retail = (fecha_venta >= fecha_limite) & (responsable.isin(["CONECTA RETAIL", "INTEGRA RETAIL"]))
-        cond_materiales = (categoria == "MATERIALES Y ACABADOS DE CONSTRUCCIÓN") & (~responsable.isin(
-            ["A & G INGENIERIA", "INCOSER GAS PERU S.A.C.", "PROMART"]))
-        cond_motos = (
-            categoria.isin(["MOTOS", "MOTOS ELECTRICAS", "ACCESORIOS MOTOS"]) &
-            (~responsable.isin(["CONECTA RETAIL", "INTEGRA RETAIL"]))
-        )
-        cond_merpes = (aliado == "GRUPO MERPES") & (categoria == "MUEBLES")
-
-        # Asignar canales
-        canal.loc[cond_retail] = "RETAIL"
-        canal.loc[cond_retail_1] = "RETAIL"
-        canal.loc[cond_materiales] = "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
-        canal.loc[cond_motos] = "MOTOS"
-        canal.loc[cond_merpes] = "MATERIALES Y ACABADOS DE CONSTRUCCIÓN"
-
-        # Para los que no tienen canal asignado, usar mapeo de SEDE
-        mask_sin_canal = canal == ''
-        canal_desde_sede = sede.loc[mask_sin_canal].map(mapeo).fillna('')
-        canal.loc[mask_sin_canal] = canal_desde_sede
-
-        # Identificar sedes que no tienen canal asignado
-        mask_final_sin_canal = canal == ''
-        sedes_sin_canal = set()
-        if mask_final_sin_canal.any():
-            sedes_sin_canal = set(sede.loc[mask_final_sin_canal].unique())
-            # Remover valores vacíos o nan
-            sedes_sin_canal = {s for s in sedes_sin_canal if s and str(s).strip() and str(s).upper() != 'NAN'}
-
-        return canal, sedes_sin_canal
+        
+        # VALIDACIÓN 1: Verificar que todas las sedes estén en el mapeo
+        sedes_unicas = set(sede.unique())
+        sedes_no_encontradas = sedes_unicas - mapeo.keys()
+        # Limpiar valores inválidos de sedes_no_encontradas
+        sedes_no_encontradas = {s for s in sedes_no_encontradas 
+                                if s and str(s).strip() and str(s).upper() not in ['NAN', 'NONE', 'NULL', 'N/A', '']}
+        
+        if sedes_no_encontradas:
+            mensaje_error = (
+                f"ERROR: Se encontraron {len(sedes_no_encontradas)} sede(s) que NO están en el archivo de canales:\n"
+                f"{', '.join(sorted(sedes_no_encontradas))}\n\n"
+                f"Por favor, agregue estas sedes al archivo:\n{self.ruta_canal_fija}"
+            )
+            logger.error(mensaje_error)
+            raise ValueError(mensaje_error)
+        
+        # Asignar canal usando el mapeo de SEDE
+        canal = sede.map(mapeo)
+        
+        # VALIDACIÓN 2: Verificar que ningún canal esté vacío o sea un valor inválido
+        valores_invalidos = ['', 'NAN', 'NONE', 'NULL', 'N/A']
+        mask_canal_invalido = canal.isin(valores_invalidos) | canal.isna()
+        
+        if mask_canal_invalido.any():
+            sedes_con_canal_invalido = sede.loc[mask_canal_invalido].unique()
+            canales_invalidos = canal.loc[mask_canal_invalido].unique()
+            mensaje_error = (
+                f"ERROR: Se encontraron {len(sedes_con_canal_invalido)} sede(s) con canal vacío o inválido:\n"
+                f"Sedes sin canal válido: {', '.join(sorted(sedes_con_canal_invalido))}\n"
+                f"Canales encontrados: {', '.join([str(c) for c in canales_invalidos])}\n\n"
+                f"Por favor, verifique que todas las sedes tengan un canal asignado en:\n{self.ruta_canal_fija}"
+            )
+            logger.error(mensaje_error)
+            raise ValueError(mensaje_error)
+        
+        logger.info(f"Canales asignados correctamente para {len(sedes_unicas)} sede(s) única(s)")
+        return canal, set()  # Retornar set vacío ya que todas las validaciones pasaron
 
     def _crear_columnas_pivotadas_ordenadas(self, df_g2_pivot: pd.DataFrame) -> pd.DataFrame:
         """Reordena las columnas pivotadas para que estén agrupadas por producto"""
@@ -534,29 +541,10 @@ class SalesDataProcessor:
                     axis=1
                 )
 
-            # CORRECCIÓN: Determinar canal de venta y validar completitud
+            # Determinar canal de venta (con validaciones integradas)
             mapeo = self._cargar_mapeo_canales()
-            canal_result, sedes_sin_canal = self._determinar_canal_venta_vectorizado(df_final, mapeo)
+            canal_result, _ = self._determinar_canal_venta_vectorizado(df_final, mapeo)
             df_final['CANAL_VENTA'] = canal_result
-
-            # Verificar que no queden canales en blanco
-            if sedes_sin_canal:
-                print("❌ ERROR: Se encontraron sedes sin canal asignado:")
-                print("=" * 60)
-                for sede in sorted(sedes_sin_canal):
-                    print(f"   • {sede}")
-                print("=" * 60)
-                print("Por favor, actualice el archivo Canal.xlsx con estas sedes antes de continuar.")
-                print("El proceso se ha detenido.")
-                return
-
-            # Verificar si aún hay registros sin canal
-            registros_sin_canal = (df_final['CANAL_VENTA'] == '') | (df_final['CANAL_VENTA'].isna())
-            if registros_sin_canal.any():
-                count_sin_canal = registros_sin_canal.sum()
-                print(f"❌ ERROR: {count_sin_canal} registros sin canal de venta asignado.")
-                print("Revise la configuración del mapeo de canales.")
-                return
 
            # === AJUSTE CARDIF (vectorizado) ===
             if 'Nro. PEDIDO CARDIF' in df_final.columns and 'Nro. PEDIDO VENTA' in df_final.columns:
