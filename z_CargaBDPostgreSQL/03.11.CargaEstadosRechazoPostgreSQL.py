@@ -14,19 +14,19 @@ db_config = {
 # Ruta del archivo Excel
 excel_path = r"D:\FNB\Reportes\04 Reporte Clientes Potenciales\Estado Rechazo.xlsx"
 sheet_name = "Hoja1"
-table_name = "bd_potenciales_estados_rechazo"
+table_name = "bdc_potenciales_estados_rechazo"
 
-def crear_tabla_bd_estados_rechazo(cursor):
-    """Crea la tabla bd_potenciales_estados_rechazo si no existe"""
+def crear_tabla_bdc_estados_rechazo(cursor):
+    """Crea la tabla bdc_potenciales_estados_rechazo si no existe"""
     create_table_sql = """
-    CREATE TABLE IF NOT EXISTS bd_potenciales_estados_rechazo (
+    CREATE TABLE IF NOT EXISTS bdc_potenciales_estados_rechazo (
         motivo VARCHAR(500) NOT NULL,
         motivo_agrupado VARCHAR(500) NOT NULL,
         UNIQUE (motivo, motivo_agrupado)
     )
     """
     cursor.execute(create_table_sql)
-    print("✅ Tabla bd_potenciales_estados_rechazo verificada/creada")
+    print("✅ Tabla bdc_potenciales_estados_rechazo verificada/creada")
 
 def asegurar_indice_unico(conn):
     """Asegura que exista un índice/constraint único para (motivo, motivo_agrupado)."""
@@ -116,7 +116,7 @@ def crear_tabla(conn):
     try:
         cursor = conn.cursor()
         # Usar la función que crea la tabla con IF NOT EXISTS
-        crear_tabla_bd_estados_rechazo(cursor)
+        crear_tabla_bdc_estados_rechazo(cursor)
         conn.commit()
         cursor.close()
         return True
